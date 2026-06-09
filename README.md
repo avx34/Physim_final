@@ -20,7 +20,7 @@ ignored by Git.
 ## Setup
 
 ```powershell
-pip install -r Inversive\requirements.txt
+pip install -r requirements.txt
 ```
 
 If PowerShell blocks virtualenv activation, run the Python commands through
@@ -93,6 +93,7 @@ to `Inversive\data\plots\baseline\`. Training writes
 Interactive demo:
 
 ```powershell
+python cd ..
 python mpm_softbody_demo.py
 ```
 
