@@ -11,6 +11,7 @@ pipelines that estimate Young's modulus from trajectory observables.
 - `Inversive/code/inverse_train.py`: trains the NN+finite-difference inverse model and runs inference.
 - `Inversive/code/optimize_E_search.py`: derivative-free inverse baseline.
 - `Inversive/code/render_trajectory_compare.py`: side-by-side particle rollout visualization.
+- `Inversive/code/replay_collision_compare.py`: Taichi scene replay with collision geometry.
 - `Inversive/code/evaluate_E_robustness.py`: robustness sweep over target `E` values.
 - `Inversive/code/mpm_sim.py`: differentiable MPM kernels.
 - `Inversive/code/observables.py`: trajectory features and loss computation.
@@ -66,6 +67,19 @@ Visualize target vs inverse rollout side by side:
 python code\render_trajectory_compare.py --format mp4
 ```
 
+Replay the same comparison in a Taichi collision scene:
+
+```powershell
+python code\replay_collision_compare.py
+```
+
+Record that collision-scene replay:
+
+```powershell
+python code\replay_collision_compare.py --record --format frames
+python code\replay_collision_compare.py --record --format mp4
+```
+
 If `ffmpeg` is not installed, export frames instead:
 
 ```powershell
@@ -108,9 +122,9 @@ NN plots are written to `Inversive\data\plots\nn\`; baseline plots are written
 to `Inversive\data\plots\baseline\`. Training writes
 `Inversive\data\training_log.npz`; NN inference writes
 `Inversive\data\predicted_trajectory.npz`; the baseline writes
-`Inversive\data\E_search_result.npz`. Side-by-side rollout videos are written
-to `Inversive\data\renders\`, and robustness plots are written to
-`Inversive\data\plots\robustness\`.
+`Inversive\data\E_search_result.npz`. Side-by-side rollout videos and collision
+replay frames are written to `Inversive\data\renders\`, and robustness plots
+are written to `Inversive\data\plots\robustness\`.
 
 Interactive demo:
 
