@@ -14,7 +14,7 @@ import argparse
 import os
 
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 import numpy as np
 
 
@@ -30,7 +30,7 @@ parser.add_argument("--pred", default=os.path.join(DATA_DIR,
                                                   "predicted_trajectory.npz"))
 parser.add_argument("--output", default="trajectory_compare.mp4",
                     help="output file name; placed under data/renders by default")
-parser.add_argument("--format", choices=("mp4", "gif", "frames"),
+parser.add_argument("--format", choices=("mp4", "frames"),
                     default="mp4")
 parser.add_argument("--fps", type=int, default=12)
 parser.add_argument("--stride", type=int, default=1,
@@ -133,14 +133,9 @@ def main():
 
     anim = FuncAnimation(fig, draw, frames=len(frame_ids), interval=1000 / args.fps)
     path = output_path()
-    if args.format == "gif":
-        if not path.lower().endswith(".gif"):
-            path = os.path.splitext(path)[0] + ".gif"
-        writer = PillowWriter(fps=args.fps)
-    else:
-        if not path.lower().endswith(".mp4"):
-            path = os.path.splitext(path)[0] + ".mp4"
-        writer = FFMpegWriter(fps=args.fps, bitrate=1800)
+    if not path.lower().endswith(".mp4"):
+        path = os.path.splitext(path)[0] + ".mp4"
+    writer = FFMpegWriter(fps=args.fps, bitrate=1800)
 
     anim.save(path, writer=writer, dpi=args.dpi)
     plt.close(fig)

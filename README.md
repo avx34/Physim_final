@@ -83,13 +83,19 @@ python code\inverse_train.py --infer
 Generate the default Taichi collision-scene comparison video:
 
 ```powershell
-python code\replay_collision_compare.py
+python code\replay_collision_compare.py --record
+```
+
+This requires `ffmpeg` for MP4 encoding:
+
+```powershell
+conda install -c conda-forge ffmpeg
 ```
 
 Open the same replay interactively:
 
 ```powershell
-python code\replay_collision_compare.py --viewer
+python code\replay_collision_compare.py
 ```
 
 Generate the optional non-scene particle-cloud comparison video:
@@ -98,11 +104,9 @@ Generate the optional non-scene particle-cloud comparison video:
 python code\render_trajectory_compare.py --format mp4
 ```
 
-If `ffmpeg` is not installed, both video scripts keep PNG frames instead. You
-can also explicitly export frames:
+The optional non-scene renderer can still export frames when needed:
 
 ```powershell
-python code\replay_collision_compare.py --format frames
 python code\render_trajectory_compare.py --format frames
 ```
 

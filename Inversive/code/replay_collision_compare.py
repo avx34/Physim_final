@@ -12,8 +12,7 @@ Run after:
 Examples:
 
     python code/replay_collision_compare.py
-    python code/replay_collision_compare.py --viewer
-    python code/replay_collision_compare.py --format frames
+    python code/replay_collision_compare.py --record
 """
 import argparse
 import os
@@ -33,9 +32,8 @@ parser.add_argument("--target", default=os.path.join(DATA_DIR,
                                                     "target_trajectory.npz"))
 parser.add_argument("--pred", default=os.path.join(DATA_DIR,
                                                   "predicted_trajectory.npz"))
-parser.add_argument("--viewer", action="store_true",
-                    help="open an interactive viewer instead of recording")
-parser.add_argument("--format", choices=("mp4", "frames"), default="mp4")
+parser.add_argument("--record", action="store_true",
+                    help="record an MP4 video instead of opening the viewer")
 parser.add_argument("--output", default="collision_compare.mp4",
                     help="mp4 output name; placed under data/renders by default")
 parser.add_argument("--fps", type=int, default=12)
@@ -129,12 +127,17 @@ def init_taichi():
     raise RuntimeError("No Taichi backend available")
 
 
-def maybe_encode_mp4(frame_dir, output_path, fps):
+def require_ffmpeg():
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        print("ffmpeg was not found. Kept PNG frames instead:")
-        print(f"  {frame_dir}")
-        return
+        raise RuntimeError(
+            "ffmpeg was not found. Install it before recording video, e.g. "
+            "`conda install -c conda-forge ffmpeg`."
+        )
+    return ffmpeg
+
+
+def encode_mp4(frame_dir, output_path, fps, ffmpeg):
     cmd = [
         ffmpeg, "-y",
         "-framerate", str(fps),
@@ -159,6 +162,11 @@ def clear_old_frames(frame_dir):
     for name in os.listdir(frame_dir):
         if name.startswith("frame_") and name.endswith(".png"):
             os.remove(os.path.join(frame_dir, name))
+
+
+def remove_frame_dir(frame_dir):
+    if os.path.isdir(frame_dir):
+        shutil.rmtree(frame_dir)
 
 
 def main():
@@ -233,7 +241,7 @@ def main():
           f"warmup_steps={warmup}")
     print(f"Loaded particle bounds: min={raw_min}, max={raw_max}")
 
-    if args.viewer:
+    if not args.record:
         frame_cursor = 0
         print("Viewer mode. Hold right mouse button to adjust the camera.")
         while window.running:
@@ -244,6 +252,7 @@ def main():
             frame_cursor = (frame_cursor + 1) % len(frame_ids)
         return
 
+    ffmpeg = require_ffmpeg()
     os.makedirs(DEFAULT_OUT_DIR, exist_ok=True)
     clear_old_frames(DEFAULT_OUT_DIR)
     for out_index, frame_id in enumerate(frame_ids):
@@ -253,10 +262,8 @@ def main():
         window.show()
         print(f"Saved {frame_path}")
 
-    if args.format == "mp4":
-        maybe_encode_mp4(DEFAULT_OUT_DIR, output_mp4_path(), args.fps)
-    else:
-        print(f"Saved frames to {DEFAULT_OUT_DIR}")
+    encode_mp4(DEFAULT_OUT_DIR, output_mp4_path(), args.fps, ffmpeg)
+    remove_frame_dir(DEFAULT_OUT_DIR)
 
 
 if __name__ == "__main__":

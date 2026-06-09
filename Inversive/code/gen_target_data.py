@@ -21,15 +21,12 @@ parser.add_argument("--out", type=str, default="target_trajectory.npz",
                     help="output file name under data/, or an absolute path")
 parser.add_argument("--no_particles", action="store_true",
                     help="do not save per-step particle positions")
-parser.add_argument("--warmup_steps", type=int, default=None,
+parser.add_argument("--warmup_steps", type=int, default=170,
                     help="simulation steps to run before recording target data")
 args = parser.parse_args()
 
 import taichi as ti
 from sim_config import cfg, DATA_DIR
-
-if args.warmup_steps is None:
-    args.warmup_steps = cfg.warmup_steps
 
 # True material params — what the inverse system tries to recover
 E_true, nu_true = args.E, args.nu
