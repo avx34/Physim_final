@@ -117,18 +117,12 @@ def deterministic_unit(i, salt):
 @ti.kernel
 def init_particles():
     for i in range(cfg.n_particles):
-        if ti.static(cfg.deterministic_init):
-            x[i] = [
-                cfg.init_base_x + deterministic_unit(i, 0) * cfg.init_extent,
-                cfg.init_base_y + deterministic_unit(i, 1) * cfg.init_extent,
-                cfg.init_base_z + deterministic_unit(i, 2) * cfg.init_extent,
-            ]
-            v[i] = [0.0, cfg.init_v_y, 0.0]
-        else:
-            x[i] = [ti.random() * 0.16 + 0.42,
-                    ti.random() * 0.16 + 0.12,
-                    ti.random() * 0.16 + 0.42]
-            v[i] = [0.0, -8.0, 0.0]
+        x[i] = [
+            cfg.init_base_x + deterministic_unit(i, 0) * cfg.init_extent,
+            cfg.init_base_y + deterministic_unit(i, 1) * cfg.init_extent,
+            cfg.init_base_z + deterministic_unit(i, 2) * cfg.init_extent,
+        ]
+        v[i] = [0.0, cfg.init_v_y, 0.0]
         F[i] = ti.Matrix.identity(float, 3)
         C[i] = ti.Matrix.zero(float, 3, 3)
 

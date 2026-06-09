@@ -15,11 +15,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--lo", type=float, default=50.0)
 parser.add_argument("--hi", type=float, default=800.0)
 parser.add_argument("--iters", type=int, default=24)
-parser.add_argument("--random_init", action="store_true",
-                    help="use the original stochastic particle initialization")
 args = parser.parse_args()
 
-scfg.cfg.deterministic_init = not args.random_init
 scfg.cfg.init_taichi()
 
 import mpm_sim as sim

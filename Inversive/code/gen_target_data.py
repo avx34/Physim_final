@@ -9,16 +9,9 @@ target_trajectory.npz.
 Shares configuration with the training pipeline via `sim_config.cfg`.
 """
 import os
-import argparse
 import numpy as np
 import taichi as ti
 from sim_config import cfg, DATA_DIR
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--random_init", action="store_true",
-                    help="use the original stochastic particle initialization")
-args = parser.parse_args()
-cfg.deterministic_init = not args.random_init
 
 # True material params — what the inverse system tries to recover
 E_true, nu_true = 400.0, 0.4
@@ -104,18 +97,12 @@ def deterministic_unit(i, salt):
 @ti.kernel
 def init():
     for i in range(cfg.n_particles):
-        if ti.static(cfg.deterministic_init):
-            x[i] = [
-                cfg.init_base_x + deterministic_unit(i, 0) * cfg.init_extent,
-                cfg.init_base_y + deterministic_unit(i, 1) * cfg.init_extent,
-                cfg.init_base_z + deterministic_unit(i, 2) * cfg.init_extent,
-            ]
-            v[i] = [0.0, cfg.init_v_y, 0.0]
-        else:
-            x[i] = [ti.random() * 0.16 + 0.42,
-                    ti.random() * 0.16 + 0.12,
-                    ti.random() * 0.16 + 0.42]
-            v[i] = [0.0, -8.0, 0.0]
+        x[i] = [
+            cfg.init_base_x + deterministic_unit(i, 0) * cfg.init_extent,
+            cfg.init_base_y + deterministic_unit(i, 1) * cfg.init_extent,
+            cfg.init_base_z + deterministic_unit(i, 2) * cfg.init_extent,
+        ]
+        v[i] = [0.0, cfg.init_v_y, 0.0]
         F[i] = ti.Matrix.identity(float, 3)
         C[i] = ti.Matrix.zero(float, 3, 3)
 

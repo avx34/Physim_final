@@ -37,9 +37,8 @@ class SimConfig:
         self.penalty_k = 1e5
         self.penalty_damp = 2e3
 
-        # Initial condition. Deterministic mode removes per-epoch physical
+        # Deterministic initial condition: removes per-epoch physical
         # initialization noise while keeping an irregular particle cloud.
-        self.deterministic_init = True
         self.init_base_x = 0.42
         self.init_base_y = 0.12
         self.init_base_z = 0.42

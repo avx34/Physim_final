@@ -1,6 +1,6 @@
 # Inverse MPM Soft-Body Simulation
 
-This branch contains a Taichi-based 3D MPM soft-body simulator and inverse
+This branch contains a Taichi-based 3D MPM soft-body simulator and clean inverse
 pipelines that estimate Young's modulus from trajectory observables.
 
 ## Project Layout
@@ -8,7 +8,7 @@ pipelines that estimate Young's modulus from trajectory observables.
 - `Inversive/mpm_softbody_demo.py`: interactive forward simulation demo.
 - `Inversive/code/sim_config.py`: shared simulation and training configuration.
 - `Inversive/code/gen_target_data.py`: generates the target trajectory dataset.
-- `Inversive/code/inverse_train.py`: trains the inverse model and runs inference.
+- `Inversive/code/inverse_train.py`: trains the NN+finite-difference inverse model and runs inference.
 - `Inversive/code/optimize_E_search.py`: derivative-free inverse baseline.
 - `Inversive/code/mpm_sim.py`: differentiable MPM kernels.
 - `Inversive/code/observables.py`: trajectory features and loss computation.
@@ -38,41 +38,21 @@ cd Inversive
 python code\gen_target_data.py
 ```
 
-By default, target generation, training, and inference use a deterministic
-pseudo-random initial particle cloud. To reproduce the original stochastic
-experiment, add `--random_init` to both target generation and training/inference
-commands.
+Target generation, training, and inference use the same deterministic
+pseudo-random initial particle cloud. This removes per-epoch physical
+initial-condition noise while keeping an irregular particle distribution.
 
-Fast smoke test for training:
+## Method A: NN+FD Inverse Model
 
-```powershell
-python code\inverse_train.py --quick_test --tiny
-```
-
-## Method A: Neural AD Experiment
-
-This route predicts `E` with a small Taichi-backed neural network and attempts
-to train it through Taichi reverse-mode AD. It is useful for diagnosing the
-differentiable simulation path, but current gradient checks show that the
-segmented AD gradient can be numerically unreliable for this MPM setup.
+This route predicts `E` with a small Taichi-backed neural network. The physics
+gradient `dL/dE` is estimated with finite differences, then backpropagated only
+through the neural network. This avoids reverse-mode AD through the full MPM
+rollout while keeping the neural inverse estimator.
 
 Train the neural model:
 
 ```powershell
-python code\inverse_train.py --train --seg_len 2
-```
-
-For a gentler NN experiment, reduce the learning rate:
-
-```powershell
-python code\inverse_train.py --train --seg_len 2 --lr 3e-4
-```
-
-To keep the neural predictor but avoid reverse-mode AD through the MPM rollout,
-train with finite-difference physics gradients:
-
-```powershell
-python code\inverse_train.py --train --fd_train --lr 3e-4 --epochs 80
+python code\inverse_train.py --train --lr 3e-4 --epochs 80
 ```
 
 Inference after training:
@@ -81,11 +61,10 @@ Inference after training:
 python code\inverse_train.py --infer
 ```
 
-Compare the true finite-difference gradient with the segmented Taichi AD
-gradient used by training:
+Fast smoke test:
 
 ```powershell
-python code\check_E_gradient.py --E 425 --seg_len 2
+python code\inverse_train.py --quick_test --tiny
 ```
 
 ## Method B: Derivative-Free Baseline
@@ -94,12 +73,6 @@ This route does not use NN training or reverse-mode AD. It directly searches
 for the `E` value whose forward simulation minimizes the same observable loss.
 Because the current problem has only one unknown parameter, this is the most
 stable baseline.
-
-Scan the forward loss directly over candidate material parameters:
-
-```powershell
-python code\scan_E_loss.py
-```
 
 Estimate E with golden-section search:
 

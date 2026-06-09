@@ -46,120 +46,99 @@ def load_npz(name):
 
 def plot_baseline_search():
     result_path = os.path.join(DATA_DIR, "E_search_result.npz")
-    scan_path = os.path.join(DATA_DIR, "E_loss_scan.npy")
-    if not os.path.exists(result_path) and not os.path.exists(scan_path):
-        print("Skip baseline plots: run `python code\\optimize_E_search.py` "
-              "or `python code\\scan_E_loss.py`.")
+    if not os.path.exists(result_path):
+        print("Skip baseline plots: run `python code\\optimize_E_search.py`.")
         return
 
-    if os.path.exists(result_path):
-        result = load_npz("E_search_result.npz")
-        evals = result["evaluations"]
-        iters = result["iterations"]
-        e_true = float(result["E_true"])
-        best_e = float(result["best_E"])
-        best_loss = float(result["best_loss"])
+    result = load_npz("E_search_result.npz")
+    evals = result["evaluations"]
+    iters = result["iterations"]
+    e_true = float(result["E_true"])
+    best_e = float(result["best_E"])
+    best_loss = float(result["best_loss"])
 
-        order = np.argsort(evals[:, 0])
-        plt.figure(figsize=(7.2, 4.2))
-        plt.semilogy(evals[order, 0], np.maximum(evals[order, 1], 1e-16),
-                     marker="o", color="#2458a6", linewidth=1.8)
-        plt.axvline(e_true, label=f"True E = {e_true:.1f}",
-                    color="#c44536", linestyle="--", linewidth=1.8)
-        plt.axvline(best_e, label=f"Best E = {best_e:.2f}",
-                    color="#1f8a70", linestyle=":", linewidth=2.0)
-        plt.xlabel("Young's modulus E")
-        plt.ylabel("Weighted loss (log scale)")
-        plt.title("Derivative-Free Search: E-Loss Samples")
-        plt.legend()
-        plt.grid(True, which="both", alpha=0.28)
-        savefig("E_loss_samples.png", "baseline")
+    order = np.argsort(evals[:, 0])
+    plt.figure(figsize=(7.2, 4.2))
+    plt.semilogy(evals[order, 0], np.maximum(evals[order, 1], 1e-16),
+                 marker="o", color="#2458a6", linewidth=1.8)
+    plt.axvline(e_true, label=f"True E = {e_true:.1f}",
+                color="#c44536", linestyle="--", linewidth=1.8)
+    plt.axvline(best_e, label=f"Best E = {best_e:.2f}",
+                color="#1f8a70", linestyle=":", linewidth=2.0)
+    plt.xlabel("Young's modulus E")
+    plt.ylabel("Weighted loss (log scale)")
+    plt.title("Derivative-Free Search: E-Loss Samples")
+    plt.legend()
+    plt.grid(True, which="both", alpha=0.28)
+    savefig("E_loss_samples.png", "baseline")
 
-        plt.figure(figsize=(7.2, 4.2))
-        plt.plot(iters[:, 0], iters[:, 7], color="#1f8a70", linewidth=2,
-                 label="Best E so far")
-        plt.fill_between(iters[:, 0], iters[:, 1], iters[:, 2],
-                         color="#2458a6", alpha=0.16, label="Search bracket")
-        plt.axhline(e_true, label=f"True E = {e_true:.1f}",
-                    color="#c44536", linestyle="--", linewidth=1.8)
-        plt.xlabel("Iteration")
-        plt.ylabel("Young's modulus E")
-        plt.title("Derivative-Free Search Convergence")
-        plt.legend()
-        plt.grid(True, alpha=0.28)
-        savefig("E_convergence.png", "baseline")
+    plt.figure(figsize=(7.2, 4.2))
+    plt.plot(iters[:, 0], iters[:, 7], color="#1f8a70", linewidth=2,
+             label="Best E so far")
+    plt.fill_between(iters[:, 0], iters[:, 1], iters[:, 2],
+                     color="#2458a6", alpha=0.16, label="Search bracket")
+    plt.axhline(e_true, label=f"True E = {e_true:.1f}",
+                color="#c44536", linestyle="--", linewidth=1.8)
+    plt.xlabel("Iteration")
+    plt.ylabel("Young's modulus E")
+    plt.title("Derivative-Free Search Convergence")
+    plt.legend()
+    plt.grid(True, alpha=0.28)
+    savefig("E_convergence.png", "baseline")
 
-        fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
-        axes[0].semilogy(iters[:, 0], np.maximum(iters[:, 8], 1e-16),
-                         color="#6a4c93", linewidth=2)
-        axes[0].set_ylabel("Best loss")
-        axes[0].set_title("Baseline Loss and Bracket Width")
-        axes[0].grid(True, which="both", alpha=0.28)
-        axes[1].semilogy(iters[:, 0], np.maximum(iters[:, 9], 1e-12),
-                         color="#dd7f20", linewidth=2)
-        axes[1].set_xlabel("Iteration")
-        axes[1].set_ylabel("Bracket width")
-        axes[1].grid(True, which="both", alpha=0.28)
-        savefig("search_diagnostics.png", "baseline")
+    fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
+    axes[0].semilogy(iters[:, 0], np.maximum(iters[:, 8], 1e-16),
+                     color="#6a4c93", linewidth=2)
+    axes[0].set_ylabel("Best loss")
+    axes[0].set_title("Baseline Loss and Bracket Width")
+    axes[0].grid(True, which="both", alpha=0.28)
+    axes[1].semilogy(iters[:, 0], np.maximum(iters[:, 9], 1e-12),
+                     color="#dd7f20", linewidth=2)
+    axes[1].set_xlabel("Iteration")
+    axes[1].set_ylabel("Bracket width")
+    axes[1].grid(True, which="both", alpha=0.28)
+    savefig("search_diagnostics.png", "baseline")
 
-        pred_h = result["pred_h"]
-        target_h = result["target_h"][:pred_h.shape[0]]
-        steps = np.arange(pred_h.shape[0])
-        pred_s = result["pred_s"]
-        target_s = result["target_s"][:pred_s.shape[0]]
-        pred_f = result["pred_F_mean"]
-        target_f = result["target_F_mean"][:pred_f.shape[0]]
-        s_err = np.linalg.norm(pred_s - target_s, axis=(1, 2))
-        f_err = np.linalg.norm(pred_f - target_f, axis=(1, 2))
-        h_err = np.abs(pred_h - target_h)
+    pred_h = result["pred_h"]
+    target_h = result["target_h"][:pred_h.shape[0]]
+    steps = np.arange(pred_h.shape[0])
+    pred_s = result["pred_s"]
+    target_s = result["target_s"][:pred_s.shape[0]]
+    pred_f = result["pred_F_mean"]
+    target_f = result["target_F_mean"][:pred_f.shape[0]]
+    s_err = np.linalg.norm(pred_s - target_s, axis=(1, 2))
+    f_err = np.linalg.norm(pred_f - target_f, axis=(1, 2))
+    h_err = np.abs(pred_h - target_h)
 
-        fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.2))
-        axes[0, 0].plot(steps, target_h, label="Target",
-                        color="#222222", linewidth=2)
-        axes[0, 0].plot(steps, pred_h, label="Baseline",
-                        color="#1f8a70", linewidth=2, linestyle="--")
-        axes[0, 0].set_title("Height Trajectory")
-        axes[0, 0].set_xlabel("Timestep")
-        axes[0, 0].set_ylabel("Mean height")
-        axes[0, 0].legend()
-        axes[0, 1].semilogy(steps, np.maximum(h_err, 1e-16),
-                            color="#2458a6", linewidth=2)
-        axes[0, 1].set_title("Height Error")
-        axes[0, 1].set_xlabel("Timestep")
-        axes[0, 1].set_ylabel("|h error|")
-        axes[1, 0].semilogy(steps, np.maximum(s_err, 1e-16),
-                            color="#c44536", linewidth=2)
-        axes[1, 0].set_title("Covariance Error")
-        axes[1, 0].set_xlabel("Timestep")
-        axes[1, 0].set_ylabel("||s error||_F")
-        axes[1, 1].semilogy(steps, np.maximum(f_err, 1e-16),
-                            color="#6a4c93", linewidth=2)
-        axes[1, 1].set_title("Mean Deformation Error")
-        axes[1, 1].set_xlabel("Timestep")
-        axes[1, 1].set_ylabel("||F_mean error||_F")
-        for ax in axes.flat:
-            ax.grid(True, which="both", alpha=0.28)
-        fig.suptitle(f"Baseline Inference Summary: E={best_e:.3f}, "
-                     f"loss={best_loss:.3e}")
-        savefig("inference_summary.png", "baseline")
-
-    if os.path.exists(scan_path):
-        scan = np.load(scan_path)
-        if scan.shape[1] >= 5:
-            e_vals = scan[:, 0]
-            losses = scan[:, 4]
-        else:
-            e_vals = scan[:, 0]
-            losses = scan[:, 1]
-        order = np.argsort(e_vals)
-        plt.figure(figsize=(7.2, 4.2))
-        plt.semilogy(e_vals[order], np.maximum(losses[order], 1e-16),
-                     marker="o", color="#2458a6", linewidth=1.8)
-        plt.xlabel("Young's modulus E")
-        plt.ylabel("Weighted loss (log scale)")
-        plt.title("Forward Loss Scan")
-        plt.grid(True, which="both", alpha=0.28)
-        savefig("forward_E_loss_scan.png", "baseline")
+    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.2))
+    axes[0, 0].plot(steps, target_h, label="Target",
+                    color="#222222", linewidth=2)
+    axes[0, 0].plot(steps, pred_h, label="Baseline",
+                    color="#1f8a70", linewidth=2, linestyle="--")
+    axes[0, 0].set_title("Height Trajectory")
+    axes[0, 0].set_xlabel("Timestep")
+    axes[0, 0].set_ylabel("Mean height")
+    axes[0, 0].legend()
+    axes[0, 1].semilogy(steps, np.maximum(h_err, 1e-16),
+                        color="#2458a6", linewidth=2)
+    axes[0, 1].set_title("Height Error")
+    axes[0, 1].set_xlabel("Timestep")
+    axes[0, 1].set_ylabel("|h error|")
+    axes[1, 0].semilogy(steps, np.maximum(s_err, 1e-16),
+                        color="#c44536", linewidth=2)
+    axes[1, 0].set_title("Covariance Error")
+    axes[1, 0].set_xlabel("Timestep")
+    axes[1, 0].set_ylabel("||s error||_F")
+    axes[1, 1].semilogy(steps, np.maximum(f_err, 1e-16),
+                        color="#6a4c93", linewidth=2)
+    axes[1, 1].set_title("Mean Deformation Error")
+    axes[1, 1].set_xlabel("Timestep")
+    axes[1, 1].set_ylabel("||F_mean error||_F")
+    for ax in axes.flat:
+        ax.grid(True, which="both", alpha=0.28)
+    fig.suptitle(f"Baseline Inference Summary: E={best_e:.3f}, "
+                 f"loss={best_loss:.3e}")
+    savefig("inference_summary.png", "baseline")
 
 
 def plot_training_curves():
