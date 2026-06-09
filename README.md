@@ -20,9 +20,6 @@ ignored by Git.
 ## Setup
 
 ```powershell
-cd "D:\PKU Personal\Course Projects\vcx\FinalProject"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 pip install -r Inversive\requirements.txt
 ```
 
