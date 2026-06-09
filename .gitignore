@@ -1,11 +1,25 @@
-imgui.ini
+# Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
 venv/
 env/
 .conda/
+
+# Editor/local settings
 .vscode/
+.idea/
 .DS_Store
+.claude/
+imgui.ini
+
+# Generated simulation artifacts
+data/
+**/data/
 *.npy
+*.npz
 *.ply
 *.mp4

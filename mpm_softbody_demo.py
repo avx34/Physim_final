@@ -4,7 +4,7 @@ import numpy as np
 ti.init(arch=ti.gpu)
 
 dim = 3
-n_particles = 27000
+n_particles = 4096
 n_grid = 128
 dx = 2.0 / n_grid #网格拉宽但分辨率不变
 inv_dx = 1 / dx
@@ -16,7 +16,7 @@ p_rho = 1
 p_mass = p_vol * p_rho
 
 # 弹性体材质参数 (Neo-Hookean)
-E, nu = 200, 0.4
+E, nu = 400, 0.4
 mu_0, lambda_0 = E / (2 * (1 + nu)), E * nu / ((1 + nu) * (1 - 2 * nu))
 
 # 碰撞参数
