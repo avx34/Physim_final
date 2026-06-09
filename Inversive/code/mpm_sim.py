@@ -127,6 +127,29 @@ def init_particles():
         C[i] = ti.Matrix.zero(float, 3, 3)
 
 
+def load_state_from_numpy(x_np, v_np, C_np, F_np):
+    """Load a saved simulation state as the rollout initial condition."""
+    x.from_numpy(x_np)
+    v.from_numpy(v_np)
+    C.from_numpy(C_np)
+    F.from_numpy(F_np)
+
+
+def init_from_target_data(data):
+    """Use warm-up state from target data when present, else fall back."""
+    required = ("x0", "v0", "C0", "F0")
+    if all(key in data for key in required):
+        load_state_from_numpy(
+            data["x0"].astype("float32"),
+            data["v0"].astype("float32"),
+            data["C0"].astype("float32"),
+            data["F0"].astype("float32"),
+        )
+        return True
+    init_particles()
+    return False
+
+
 @ti.kernel
 def copy_nn_to_material_params(fc2_output: ti.template()):
     """Extract E from NN output, map (-1,1) → (50, 800)."""

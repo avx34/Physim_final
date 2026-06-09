@@ -24,11 +24,14 @@ import observables as obs
 
 cfg = scfg.cfg
 DATA_DIR = scfg.DATA_DIR
+target_data_npz = None
 
 
 def load_target_data():
+    global target_data_npz
     path = os.path.join(DATA_DIR, "target_trajectory.npz")
     data = np.load(path)
+    target_data_npz = data
     return (
         data["h"].astype(np.float32)[:cfg.n_steps],
         data["s"].astype(np.float32)[:cfg.n_steps],
@@ -48,7 +51,7 @@ def run_obs_kernels(step):
 
 
 def forward_observables(E_value):
-    sim.init_particles()
+    sim.init_from_target_data(target_data_npz)
     sim.E_pred[None] = float(E_value)
     sim.compute_lame_params()
 

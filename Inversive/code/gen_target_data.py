@@ -21,10 +21,15 @@ parser.add_argument("--out", type=str, default="target_trajectory.npz",
                     help="output file name under data/, or an absolute path")
 parser.add_argument("--no_particles", action="store_true",
                     help="do not save per-step particle positions")
+parser.add_argument("--warmup_steps", type=int, default=None,
+                    help="simulation steps to run before recording target data")
 args = parser.parse_args()
 
 import taichi as ti
 from sim_config import cfg, DATA_DIR
+
+if args.warmup_steps is None:
+    args.warmup_steps = cfg.warmup_steps
 
 # True material params — what the inverse system tries to recover
 E_true, nu_true = args.E, args.nu
@@ -200,6 +205,20 @@ if __name__ == "__main__":
     os.makedirs(DATA_DIR, exist_ok=True)
     init()
 
+    print("Running warm-up simulation before recording target trajectory ...")
+    for step in range(args.warmup_steps):
+        for _ in range(cfg.substeps_per_step):
+            substep()
+        if step % 10 == 0 or step == args.warmup_steps - 1:
+            pos_np = x.to_numpy()
+            print(f"  warmup {step + 1:3d}/{args.warmup_steps}  "
+                  f"h={np.mean(pos_np[:, 1]):.4f}")
+
+    x0 = x.to_numpy().astype(np.float32)
+    v0 = v.to_numpy().astype(np.float32)
+    C0 = C.to_numpy().astype(np.float32)
+    F0 = F.to_numpy().astype(np.float32)
+
     h_list = []
     s_list = []
     F_list = []
@@ -236,9 +255,11 @@ if __name__ == "__main__":
         out_path = os.path.join(DATA_DIR, out_path)
 
     payload = dict(h=h_arr, s=s_arr, F_mean=F_arr,
+                   x0=x0, v0=v0, C0=C0, F0=F0,
                    E_true=E_true, nu_true=nu_true,
                    dt=cfg.dt, substeps_per_step=cfg.substeps_per_step,
-                   n_steps=cfg.n_steps)
+                   n_steps=cfg.n_steps,
+                   warmup_steps=args.warmup_steps)
     if x_list:
         payload["x"] = np.stack(x_list, axis=0).astype(np.float32)
 
@@ -247,5 +268,9 @@ if __name__ == "__main__":
     print(f"  shape h: {h_arr.shape}, s: {s_arr.shape}, F_mean: {F_arr.shape}")
     if x_list:
         print(f"  shape x: {payload['x'].shape}")
+    print(f"  saved warm-up state: x0/v0/C0/F0")
     print(f"  h range: [{h_arr.min():.4f}, {h_arr.max():.4f}]")
     print(f"  final trace(s): {np.trace(s_arr[-1]):.6f}")
+    if np.max(np.abs(F_arr - np.eye(3, dtype=np.float32))) < 1e-4:
+        print("  [WARN] F_mean stayed near identity; the recorded window may "
+              "still be mostly pre-contact motion.")
