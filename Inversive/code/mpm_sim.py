@@ -106,13 +106,29 @@ def get_sdf_normal(p):
 # ==============================================================================
 #  MPM kernels
 # ==============================================================================
+@ti.func
+def deterministic_unit(i, salt):
+    phase = (ti.cast(i + 1, float) * (12.9898 + 17.23 * ti.cast(salt, float))
+             + ti.cast(cfg.init_seed, float) * 0.12345)
+    value = ti.sin(phase) * 43758.5453
+    return value - ti.floor(value)
+
+
 @ti.kernel
 def init_particles():
     for i in range(cfg.n_particles):
-        x[i] = [ti.random() * 0.16 + 0.42,
-                ti.random() * 0.16 + 0.12,
-                ti.random() * 0.16 + 0.42]
-        v[i] = [0.0, -8.0, 0.0]
+        if ti.static(cfg.deterministic_init):
+            x[i] = [
+                cfg.init_base_x + deterministic_unit(i, 0) * cfg.init_extent,
+                cfg.init_base_y + deterministic_unit(i, 1) * cfg.init_extent,
+                cfg.init_base_z + deterministic_unit(i, 2) * cfg.init_extent,
+            ]
+            v[i] = [0.0, cfg.init_v_y, 0.0]
+        else:
+            x[i] = [ti.random() * 0.16 + 0.42,
+                    ti.random() * 0.16 + 0.12,
+                    ti.random() * 0.16 + 0.42]
+            v[i] = [0.0, -8.0, 0.0]
         F[i] = ti.Matrix.identity(float, 3)
         C[i] = ti.Matrix.zero(float, 3, 3)
 

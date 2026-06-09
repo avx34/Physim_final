@@ -111,6 +111,11 @@ class Linear:
         self.n_hidden = n_hidden
         self.n_output = n_output
         self.activation = activation
+        if self.n_hidden != self.n_output:
+            raise ValueError(
+                "Linear currently requires n_hidden == n_output; "
+                "the forward kernel writes one output per hidden unit."
+            )
 
         self.hidden = scalar()
         self.output = scalar()
@@ -168,6 +173,13 @@ class Linear:
         for I in ti.grouped(self.output):
             self.output[I] = 0.0
 
+    @ti.kernel
+    def clear_io_grad(self):
+        for I in ti.grouped(self.hidden):
+            self.hidden.grad[I] = 0.0
+        for I in ti.grouped(self.output):
+            self.output.grad[I] = 0.0
+
     def forward(self, t, inp):
         self._forward(t, inp)
 
@@ -186,7 +198,8 @@ class Linear:
 
     def load_weights_from_value(self, w_val, model_id=0):
         for w, val in zip(self.parameters(), w_val):
-            if val.shape[0] == 1:
+            expected_shape = w.shape[1:]
+            if val.shape != expected_shape and val.shape[0] == 1:
                 val = val[0]
             self.copy_from_numpy(w, val, model_id)
 

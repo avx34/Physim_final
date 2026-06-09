@@ -9,17 +9,25 @@ target_trajectory.npz.
 Shares configuration with the training pipeline via `sim_config.cfg`.
 """
 import os
+import argparse
 import numpy as np
 import taichi as ti
 from sim_config import cfg, DATA_DIR
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--random_init", action="store_true",
+                    help="use the original stochastic particle initialization")
+args = parser.parse_args()
+cfg.deterministic_init = not args.random_init
 
 # True material params — what the inverse system tries to recover
 E_true, nu_true = 400.0, 0.4
 mu_0_true = E_true / (2.0 * (1.0 + nu_true))
 lambda_0_true = E_true * nu_true / ((1.0 + nu_true) * (1.0 - 2.0 * nu_true))
 
-# Init with pure GPU (no gradient tracking needed for forward pass)
-ti.init(arch=ti.gpu, random_seed=42)
+# No gradient tracking is needed for the forward pass, but using the shared
+# initializer keeps CPU-only machines usable.
+cfg.init_taichi()
 
 # ---------------------------------------------------------------------------
 # Taichi fields (no needs_grad — forward-only)
@@ -85,13 +93,29 @@ def get_sdf_normal(p):
 # ---------------------------------------------------------------------------
 # MPM substep (forward-only)
 # ---------------------------------------------------------------------------
+@ti.func
+def deterministic_unit(i, salt):
+    phase = (ti.cast(i + 1, float) * (12.9898 + 17.23 * ti.cast(salt, float))
+             + ti.cast(cfg.init_seed, float) * 0.12345)
+    value = ti.sin(phase) * 43758.5453
+    return value - ti.floor(value)
+
+
 @ti.kernel
 def init():
     for i in range(cfg.n_particles):
-        x[i] = [ti.random() * 0.16 + 0.42,
-                ti.random() * 0.16 + 0.12,
-                ti.random() * 0.16 + 0.42]
-        v[i] = [0.0, -8.0, 0.0]
+        if ti.static(cfg.deterministic_init):
+            x[i] = [
+                cfg.init_base_x + deterministic_unit(i, 0) * cfg.init_extent,
+                cfg.init_base_y + deterministic_unit(i, 1) * cfg.init_extent,
+                cfg.init_base_z + deterministic_unit(i, 2) * cfg.init_extent,
+            ]
+            v[i] = [0.0, cfg.init_v_y, 0.0]
+        else:
+            x[i] = [ti.random() * 0.16 + 0.42,
+                    ti.random() * 0.16 + 0.12,
+                    ti.random() * 0.16 + 0.42]
+            v[i] = [0.0, -8.0, 0.0]
         F[i] = ti.Matrix.identity(float, 3)
         C[i] = ti.Matrix.zero(float, 3, 3)
 
@@ -173,6 +197,7 @@ def substep():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    os.makedirs(DATA_DIR, exist_ok=True)
     init()
 
     h_list = []
