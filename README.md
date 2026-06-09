@@ -23,9 +23,6 @@ ignored by Git.
 pip install -r requirements.txt
 ```
 
-If PowerShell blocks virtualenv activation, run the Python commands through
-`.\.venv\Scripts\python.exe` directly.
-
 ## Run
 
 Generate target data:
