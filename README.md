@@ -10,6 +10,8 @@ pipelines that estimate Young's modulus from trajectory observables.
 - `Inversive/code/gen_target_data.py`: generates the target trajectory dataset.
 - `Inversive/code/inverse_train.py`: trains the NN+finite-difference inverse model and runs inference.
 - `Inversive/code/optimize_E_search.py`: derivative-free inverse baseline.
+- `Inversive/code/replay_collision_compare.py`: default Taichi collision-scene comparison video.
+- `Inversive/code/render_trajectory_compare.py`: side-by-side particle rollout visualization.
 - `Inversive/code/mpm_sim.py`: differentiable MPM kernels.
 - `Inversive/code/observables.py`: trajectory features and loss computation.
 - `Inversive/code/nn_layers.py`: lightweight Taichi NN layers and AdamW.
@@ -32,9 +34,32 @@ cd Inversive
 python code\gen_target_data.py
 ```
 
-Target generation, training, and inference use the same deterministic
-pseudo-random initial particle cloud. This removes per-epoch physical
-initial-condition noise while keeping an irregular particle distribution.
+Target generation uses a deterministic high-drop initial particle cloud, runs a
+fixed warm-up phase, then records the collision-rich trajectory segment. The
+warm-up end state is saved as `x0/v0/C0/F0`, and training, inference, and the
+baseline all start from that same state.
+
+To change how much pre-collision motion is skipped:
+
+```powershell
+python code\gen_target_data.py --warmup_steps 170
+```
+
+For the current scene, `--warmup_steps` in the range `170` to `180` is
+recommended.
+
+To test another target material, regenerate target data with a chosen `E`, then
+train/infer again:
+
+```powershell
+python code\gen_target_data.py --E 450 --warmup_steps 170
+python code\inverse_train.py --train --lr 3e-4
+python code\inverse_train.py --infer
+```
+
+If `trace(s)` stays almost constant and `det(F_mean)` remains near `1.0`
+through the recorded trajectory, the object has not meaningfully collided yet.
+Increase `--warmup_steps` slightly within that range.
 
 ## Method A: NN+FD Inverse Model
 
@@ -46,13 +71,43 @@ rollout while keeping the neural inverse estimator.
 Train the neural model:
 
 ```powershell
-python code\inverse_train.py --train --lr 3e-4 --epochs 80
+python code\inverse_train.py --train --lr 3e-4
 ```
 
 Inference after training:
 
 ```powershell
 python code\inverse_train.py --infer
+```
+
+Generate the default Taichi collision-scene comparison video:
+
+```powershell
+python code\replay_collision_compare.py --record
+```
+
+This requires `ffmpeg` for MP4 encoding:
+
+```powershell
+conda install -c conda-forge ffmpeg
+```
+
+Open the same replay interactively:
+
+```powershell
+python code\replay_collision_compare.py
+```
+
+Generate the optional non-scene particle-cloud comparison video:
+
+```powershell
+python code\render_trajectory_compare.py --format mp4
+```
+
+The optional non-scene renderer can still export frames when needed:
+
+```powershell
+python code\render_trajectory_compare.py --format frames
 ```
 
 Fast smoke test:
@@ -85,12 +140,13 @@ NN plots are written to `Inversive\data\plots\nn\`; baseline plots are written
 to `Inversive\data\plots\baseline\`. Training writes
 `Inversive\data\training_log.npz`; NN inference writes
 `Inversive\data\predicted_trajectory.npz`; the baseline writes
-`Inversive\data\E_search_result.npz`.
+`Inversive\data\E_search_result.npz`. Side-by-side rollout videos are written
+to `Inversive\data\renders\`.
 
 Interactive demo:
 
 ```powershell
-python cd ..
+cd ..
 python mpm_softbody_demo.py
 ```
 

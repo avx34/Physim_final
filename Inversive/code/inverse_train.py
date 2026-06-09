@@ -21,7 +21,7 @@ parser.add_argument("--quick_test", action="store_true",
                     help="run 2 training epochs for a fast smoke test")
 parser.add_argument("--tiny", action="store_true",
                     help="run with fewer particles/steps for smoke testing")
-parser.add_argument("--epochs", type=int, default=80,
+parser.add_argument("--epochs", type=int, default=100,
                     help="number of NN+FD training epochs")
 parser.add_argument("--lr", type=float, default=3e-4,
                     help="AdamW learning rate")
@@ -59,6 +59,7 @@ optimizer: AdamW = None
 
 E_true = 200.0
 nu_true = 0.4
+target_data_npz = None
 
 
 def init_nn_model():
@@ -96,11 +97,12 @@ def init_nn_model():
 
 
 def load_target_data(path=None):
-    global E_true, nu_true
+    global E_true, nu_true, target_data_npz
     if path is None:
         path = os.path.join(DATA_DIR, "target_trajectory.npz")
 
     data = np.load(path)
+    target_data_npz = data
     h_np = data["h"].astype(np.float32)[:cfg.n_steps]
     s_np = data["s"].astype(np.float32)[:cfg.n_steps]
     f_np = data["F_mean"].astype(np.float32)[:cfg.n_steps]
@@ -123,6 +125,11 @@ def load_target_data(path=None):
 
     print(f"Loaded target trajectory: {h_np.shape[0]} steps")
     print(f"  True params: E={E_true:.1f}, nu={nu_true:.3f}")
+    if all(key in data for key in ("x0", "v0", "C0", "F0")):
+        warmup = int(data["warmup_steps"]) if "warmup_steps" in data else -1
+        print(f"  Initial state: warm-up snapshot (warmup_steps={warmup})")
+    else:
+        print("  Initial state: default particle initializer")
     print(f"  NN input features: {features}")
 
 
@@ -137,7 +144,7 @@ def run_obs_kernels(step):
 
 
 def forward_loss_for_E(E_value):
-    sim.init_particles()
+    sim.init_from_target_data(target_data_npz)
     sim.E_pred[None] = float(E_value)
     sim.compute_lame_params()
     obs.loss[None] = 0.0
@@ -271,13 +278,15 @@ def infer():
     print(f"NN predicted: E={E_pred:.4f}")
     print(f"True:         E={E_true:.4f}")
 
-    sim.init_particles()
+    sim.init_from_target_data(target_data_npz)
     sim.E_pred[None] = E_pred
     sim.compute_lame_params()
 
     pred_h = np.zeros(cfg.n_steps, dtype=np.float32)
     pred_s = np.zeros((cfg.n_steps, 3, 3), dtype=np.float32)
     pred_f = np.zeros((cfg.n_steps, 3, 3), dtype=np.float32)
+    pred_x = np.zeros((cfg.n_steps, cfg.n_particles, cfg.dim),
+                      dtype=np.float32)
 
     for step in range(cfg.n_steps):
         for _ in range(cfg.substeps_per_step):
@@ -286,6 +295,7 @@ def infer():
         pred_h[step] = obs.pred_h[step]
         pred_s[step] = obs.pred_s[step].to_numpy()
         pred_f[step] = obs.pred_F_mean[step].to_numpy()
+        pred_x[step] = sim.x.to_numpy()
 
     target_h = obs.target_h.to_numpy()
     target_s = obs.target_s.to_numpy()
@@ -300,6 +310,7 @@ def infer():
              h=pred_h,
              s=pred_s,
              F_mean=pred_f,
+             x=pred_x,
              target_h=target_h,
              target_s=target_s,
              target_F_mean=target_f,

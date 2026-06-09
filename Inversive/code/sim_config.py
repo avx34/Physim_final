@@ -40,11 +40,12 @@ class SimConfig:
         # Deterministic initial condition: removes per-epoch physical
         # initialization noise while keeping an irregular particle cloud.
         self.init_base_x = 0.42
-        self.init_base_y = 0.12
+        self.init_base_y = 0.85
         self.init_base_z = 0.42
         self.init_extent = 0.16
-        self.init_v_y = -8.0
+        self.init_v_y = -2.0
         self.init_seed = 42
+        self.warmup_steps = 170
 
         # NN architecture  (ν is fixed — only E is learned)
         self.n_input = 6
