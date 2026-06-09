@@ -29,14 +29,8 @@ ignored by Git.
 ## Setup
 
 ```powershell
-cd "D:\PKU Personal\Course Projects\vcx\FinalProject\Inversive"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
-
-If PowerShell blocks virtualenv activation, run commands through
-`.\.venv\Scripts\python.exe` directly.
 
 ## Run NN+AD
 
