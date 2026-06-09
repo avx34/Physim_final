@@ -8,13 +8,26 @@ target_trajectory.npz.
 
 Shares configuration with the training pipeline via `sim_config.cfg`.
 """
+import argparse
 import os
 import numpy as np
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--E", type=float, default=400.0,
+                    help="target Young's modulus")
+parser.add_argument("--nu", type=float, default=0.4,
+                    help="target Poisson ratio")
+parser.add_argument("--out", type=str, default="target_trajectory.npz",
+                    help="output file name under data/, or an absolute path")
+parser.add_argument("--no_particles", action="store_true",
+                    help="do not save per-step particle positions")
+args = parser.parse_args()
+
 import taichi as ti
 from sim_config import cfg, DATA_DIR
 
 # True material params — what the inverse system tries to recover
-E_true, nu_true = 400.0, 0.4
+E_true, nu_true = args.E, args.nu
 mu_0_true = E_true / (2.0 * (1.0 + nu_true))
 lambda_0_true = E_true * nu_true / ((1.0 + nu_true) * (1.0 - 2.0 * nu_true))
 
@@ -190,6 +203,7 @@ if __name__ == "__main__":
     h_list = []
     s_list = []
     F_list = []
+    x_list = []
 
     print("Running forward simulation to generate target trajectory ...")
     for step in range(cfg.n_steps):
@@ -197,6 +211,8 @@ if __name__ == "__main__":
             substep()
 
         pos_np = x.to_numpy()
+        if not args.no_particles:
+            x_list.append(pos_np.astype(np.float32))
         h = np.mean(pos_np[:, 1])
         s = np.cov(pos_np.T)
         h_list.append(h)
@@ -215,12 +231,21 @@ if __name__ == "__main__":
     s_arr = np.array(s_list, dtype=np.float32)
     F_arr = np.array(F_list, dtype=np.float32)
 
-    out_path = os.path.join(DATA_DIR, "target_trajectory.npz")
-    np.savez(out_path, h=h_arr, s=s_arr, F_mean=F_arr,
-             E_true=E_true, nu_true=nu_true,
-             dt=cfg.dt, substeps_per_step=cfg.substeps_per_step,
-             n_steps=cfg.n_steps)
+    out_path = args.out
+    if not os.path.isabs(out_path):
+        out_path = os.path.join(DATA_DIR, out_path)
+
+    payload = dict(h=h_arr, s=s_arr, F_mean=F_arr,
+                   E_true=E_true, nu_true=nu_true,
+                   dt=cfg.dt, substeps_per_step=cfg.substeps_per_step,
+                   n_steps=cfg.n_steps)
+    if x_list:
+        payload["x"] = np.stack(x_list, axis=0).astype(np.float32)
+
+    np.savez(out_path, **payload)
     print(f"Saved target trajectory to {out_path}")
     print(f"  shape h: {h_arr.shape}, s: {s_arr.shape}, F_mean: {F_arr.shape}")
+    if x_list:
+        print(f"  shape x: {payload['x'].shape}")
     print(f"  h range: [{h_arr.min():.4f}, {h_arr.max():.4f}]")
     print(f"  final trace(s): {np.trace(s_arr[-1]):.6f}")

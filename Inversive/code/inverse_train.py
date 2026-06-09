@@ -278,6 +278,8 @@ def infer():
     pred_h = np.zeros(cfg.n_steps, dtype=np.float32)
     pred_s = np.zeros((cfg.n_steps, 3, 3), dtype=np.float32)
     pred_f = np.zeros((cfg.n_steps, 3, 3), dtype=np.float32)
+    pred_x = np.zeros((cfg.n_steps, cfg.n_particles, cfg.dim),
+                      dtype=np.float32)
 
     for step in range(cfg.n_steps):
         for _ in range(cfg.substeps_per_step):
@@ -286,6 +288,7 @@ def infer():
         pred_h[step] = obs.pred_h[step]
         pred_s[step] = obs.pred_s[step].to_numpy()
         pred_f[step] = obs.pred_F_mean[step].to_numpy()
+        pred_x[step] = sim.x.to_numpy()
 
     target_h = obs.target_h.to_numpy()
     target_s = obs.target_s.to_numpy()
@@ -300,6 +303,7 @@ def infer():
              h=pred_h,
              s=pred_s,
              F_mean=pred_f,
+             x=pred_x,
              target_h=target_h,
              target_s=target_s,
              target_F_mean=target_f,

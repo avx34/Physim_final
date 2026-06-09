@@ -10,6 +10,8 @@ pipelines that estimate Young's modulus from trajectory observables.
 - `Inversive/code/gen_target_data.py`: generates the target trajectory dataset.
 - `Inversive/code/inverse_train.py`: trains the NN+finite-difference inverse model and runs inference.
 - `Inversive/code/optimize_E_search.py`: derivative-free inverse baseline.
+- `Inversive/code/render_trajectory_compare.py`: side-by-side particle rollout visualization.
+- `Inversive/code/evaluate_E_robustness.py`: robustness sweep over target `E` values.
 - `Inversive/code/mpm_sim.py`: differentiable MPM kernels.
 - `Inversive/code/observables.py`: trajectory features and loss computation.
 - `Inversive/code/nn_layers.py`: lightweight Taichi NN layers and AdamW.
@@ -58,6 +60,18 @@ Inference after training:
 python code\inverse_train.py --infer
 ```
 
+Visualize target vs inverse rollout side by side:
+
+```powershell
+python code\render_trajectory_compare.py --format mp4
+```
+
+If `ffmpeg` is not installed, export frames instead:
+
+```powershell
+python code\render_trajectory_compare.py --format frames
+```
+
 Fast smoke test:
 
 ```powershell
@@ -84,16 +98,24 @@ python code\plot_results.py --method nn
 python code\plot_results.py --method baseline
 ```
 
+Evaluate robustness across multiple target stiffness values:
+
+```powershell
+python code\evaluate_E_robustness.py --E_values 300,350,400,450,500
+```
+
 NN plots are written to `Inversive\data\plots\nn\`; baseline plots are written
 to `Inversive\data\plots\baseline\`. Training writes
 `Inversive\data\training_log.npz`; NN inference writes
 `Inversive\data\predicted_trajectory.npz`; the baseline writes
-`Inversive\data\E_search_result.npz`.
+`Inversive\data\E_search_result.npz`. Side-by-side rollout videos are written
+to `Inversive\data\renders\`, and robustness plots are written to
+`Inversive\data\plots\robustness\`.
 
 Interactive demo:
 
 ```powershell
-python cd ..
+cd ..
 python mpm_softbody_demo.py
 ```
 
