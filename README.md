@@ -1,15 +1,24 @@
-# Inverse MPM Soft-Body Simulation
+# NN+AD Inverse MPM Archive
 
-This branch contains a Taichi-based 3D MPM soft-body simulator and inverse
-pipelines that estimate Young's modulus from trajectory observables.
+This branch archives the original neural-network inverse-simulation experiment:
+a small Taichi-backed NN predicts Young's modulus `E`, and training attempts to
+differentiate through the MPM rollout with Taichi reverse-mode AD.
+
+This branch is meant for reproducing and diagnosing the earlier NN+AD approach.
+Other inverse methods live outside this archive branch.
 
 ## Project Layout
 
 - `Inversive/mpm_softbody_demo.py`: interactive forward simulation demo.
 - `Inversive/code/sim_config.py`: shared simulation and training configuration.
 - `Inversive/code/gen_target_data.py`: generates the target trajectory dataset.
-- `Inversive/code/inverse_train.py`: trains the inverse model and runs inference.
-- `Inversive/code/optimize_E_search.py`: derivative-free inverse baseline.
+- `Inversive/code/inverse_train.py`: trains and runs inference for NN+AD.
+- `Inversive/code/check_E_gradient.py`: compares finite-difference and Taichi AD
+  gradients for diagnostic purposes.
+- `Inversive/code/scan_E_loss.py`: scans the true forward loss over candidate
+  `E` values.
+- `Inversive/code/plot_results.py`: creates NN+AD training, inference, and
+  forward-scan plots.
 - `Inversive/code/mpm_sim.py`: differentiable MPM kernels.
 - `Inversive/code/observables.py`: trajectory features and loss computation.
 - `Inversive/code/nn_layers.py`: lightweight Taichi NN layers and AdamW.
@@ -20,112 +29,83 @@ ignored by Git.
 ## Setup
 
 ```powershell
-cd "D:\PKU Personal\Course Projects\vcx\FinalProject"
+cd "D:\PKU Personal\Course Projects\vcx\FinalProject\Inversive"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r Inversive\requirements.txt
+pip install -r requirements.txt
 ```
 
-If PowerShell blocks virtualenv activation, run the Python commands through
+If PowerShell blocks virtualenv activation, run commands through
 `.\.venv\Scripts\python.exe` directly.
 
-## Run
+## Run NN+AD
 
-Generate target data:
+Generate target data first:
 
 ```powershell
-cd Inversive
 python code\gen_target_data.py
 ```
+
+Train the NN+AD model:
+
+```powershell
+python code\inverse_train.py --train --seg_len 1
+```
+
+You can also try a longer AD tape:
+
+```powershell
+python code\inverse_train.py --train --seg_len 2
+```
+
+Run inference after training:
+
+```powershell
+python code\inverse_train.py --infer
+```
+
+Create plots:
+
+```powershell
+python code\plot_results.py
+```
+
+Plots are written to `Inversive\data\plots\nn_ad\`. Training writes
+`Inversive\data\training_log.npz`, and inference writes
+`Inversive\data\predicted_trajectory.npz`.
+
+## Diagnostics
+
+Compare the forward finite-difference gradient with the segmented Taichi AD
+gradient used by training:
+
+```powershell
+python code\check_E_gradient.py --E 425 --seg_len 1
+python code\check_E_gradient.py --E 425 --seg_len 2
+```
+
+Scan the true forward loss landscape:
+
+```powershell
+python code\scan_E_loss.py
+python code\plot_results.py
+```
+
+These diagnostics are the main reason this branch is preserved: they make it
+easy to show where NN+AD behaves plausibly and where the Taichi AD gradient
+becomes unreliable for this MPM rollout.
+
+## Notes
 
 By default, target generation, training, and inference use a deterministic
 pseudo-random initial particle cloud. To reproduce the original stochastic
 experiment, add `--random_init` to both target generation and training/inference
 commands.
 
-Fast smoke test for training:
-
-```powershell
-python code\inverse_train.py --quick_test --tiny
-```
-
-## Method A: Neural AD Experiment
-
-This route predicts `E` with a small Taichi-backed neural network and attempts
-to train it through Taichi reverse-mode AD. It is useful for diagnosing the
-differentiable simulation path, but current gradient checks show that the
-segmented AD gradient can be numerically unreliable for this MPM setup.
-
-Train the neural model:
-
-```powershell
-python code\inverse_train.py --train --seg_len 2
-```
-
-For a gentler NN experiment, reduce the learning rate:
-
-```powershell
-python code\inverse_train.py --train --seg_len 2 --lr 3e-4
-```
-
-To keep the neural predictor but avoid reverse-mode AD through the MPM rollout,
-train with finite-difference physics gradients:
-
-```powershell
-python code\inverse_train.py --train --fd_train --lr 3e-4 --epochs 80
-```
-
-Inference after training:
-
-```powershell
-python code\inverse_train.py --infer
-```
-
-Compare the true finite-difference gradient with the segmented Taichi AD
-gradient used by training:
-
-```powershell
-python code\check_E_gradient.py --E 425 --seg_len 2
-```
-
-## Method B: Derivative-Free Baseline
-
-This route does not use NN training or reverse-mode AD. It directly searches
-for the `E` value whose forward simulation minimizes the same observable loss.
-Because the current problem has only one unknown parameter, this is the most
-stable baseline.
-
-Scan the forward loss directly over candidate material parameters:
-
-```powershell
-python code\scan_E_loss.py
-```
-
-Estimate E with golden-section search:
-
-```powershell
-python code\optimize_E_search.py
-```
-
-Generate result plots:
-
-```powershell
-python code\plot_results.py --method nn
-python code\plot_results.py --method baseline
-```
-
-NN plots are written to `Inversive\data\plots\nn\`; baseline plots are written
-to `Inversive\data\plots\baseline\`. Training writes
-`Inversive\data\training_log.npz`; NN inference writes
-`Inversive\data\predicted_trajectory.npz`; the baseline writes
-`Inversive\data\E_search_result.npz`.
-
-Interactive demo:
+The scripts try CUDA first and fall back to CPU where supported. The interactive
+demo uses Taichi's GUI window, so it is best run on a local machine with graphics
+support:
 
 ```powershell
 python mpm_softbody_demo.py
 ```
-
-The scripts try CUDA first and fall back to CPU where supported. The interactive
-demo uses Taichi's GUI window, so it is best run on a local machine with graphics
-support.
