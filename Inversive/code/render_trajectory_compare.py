@@ -102,6 +102,8 @@ def main():
 
     e_true = float(target_data["E_true"]) if "E_true" in target_data else np.nan
     e_pred = float(pred_data["E_pred"]) if "E_pred" in pred_data else np.nan
+    nu_true = float(target_data["nu_true"]) if "nu_true" in target_data else np.nan
+    nu_pred = float(pred_data["nu_pred"]) if "nu_pred" in pred_data else nu_true
 
     fig = plt.figure(figsize=(11.0, 5.2))
     ax_target = fig.add_subplot(1, 2, 1, projection="3d")
@@ -112,9 +114,11 @@ def main():
         ax_target.cla()
         ax_pred.cla()
         scatter_positions(ax_target, target_x[step],
-                          f"Target, E={e_true:.2f}", mins, maxs)
+                          f"Target, E={e_true:.2f}, nu={nu_true:.3f}",
+                          mins, maxs)
         scatter_positions(ax_pred, pred_x[step],
-                          f"Inverse prediction, E={e_pred:.2f}", mins, maxs)
+                          f"Prediction, E={e_pred:.2f}, nu={nu_pred:.3f}",
+                          mins, maxs)
         fig.suptitle(f"MPM soft-body trajectory comparison | step {step}")
         return []
 

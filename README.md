@@ -48,13 +48,17 @@ python code\gen_target_data.py --warmup_steps 170
 For the current scene, `--warmup_steps` in the range `170` to `180` is
 recommended.
 
-To test another target material, regenerate target data with a chosen `E`, then
-train/infer again:
+To test another target material, regenerate target data with a chosen `E` or
+Poisson ratio `nu`, then train/infer again:
 
 ```powershell
 python code\gen_target_data.py --E 450 --warmup_steps 170
 python code\inverse_train.py --train --lr 3e-4
 python code\inverse_train.py --infer
+
+python code\gen_target_data.py --nu 0.35 --warmup_steps 170
+python code\inverse_train.py --train --learn_param nu --lr 3e-4
+python code\inverse_train.py --infer --learn_param nu
 ```
 
 If `trace(s)` stays almost constant and `det(F_mean)` remains near `1.0`
@@ -63,10 +67,10 @@ Increase `--warmup_steps` slightly within that range.
 
 ## Method A: NN+FD Inverse Model
 
-This route predicts `E` with a small Taichi-backed neural network. The physics
-gradient `dL/dE` is estimated with finite differences, then backpropagated only
-through the neural network. This avoids reverse-mode AD through the full MPM
-rollout while keeping the neural inverse estimator.
+This route predicts one material parameter with a small Taichi-backed neural
+network. The physics gradient is estimated with finite differences, then
+backpropagated only through the neural network. This avoids reverse-mode AD
+through the full MPM rollout while keeping the neural inverse estimator.
 
 Train the neural model:
 
@@ -78,6 +82,15 @@ Inference after training:
 
 ```powershell
 python code\inverse_train.py --infer
+```
+
+To learn Poisson ratio instead, keep `E` fixed to the target value and train
+only `nu`:
+
+```powershell
+python code\gen_target_data.py --nu 0.35 --warmup_steps 170
+python code\inverse_train.py --train --learn_param nu --lr 3e-4
+python code\inverse_train.py --infer --learn_param nu
 ```
 
 Generate the default Taichi collision-scene comparison video:

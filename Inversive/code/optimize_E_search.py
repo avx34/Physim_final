@@ -53,6 +53,7 @@ def run_obs_kernels(step):
 def forward_observables(E_value):
     sim.init_from_target_data(target_data_npz)
     sim.E_pred[None] = float(E_value)
+    sim.nu_pred[None] = float(target_data_npz["nu_true"])
     sim.compute_lame_params()
 
     pred_h = np.zeros(cfg.n_steps, dtype=np.float32)

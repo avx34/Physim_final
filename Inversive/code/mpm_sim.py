@@ -12,6 +12,7 @@ from sim_config import cfg
 #  Material parameter fields
 # ==============================================================================
 E_pred = ti.field(dtype=float, shape=(), needs_grad=True)
+nu_pred = ti.field(dtype=float, shape=(), needs_grad=True)
 mu_tmp = ti.field(dtype=float, shape=(), needs_grad=True)
 lambda_tmp = ti.field(dtype=float, shape=(), needs_grad=True)
 
@@ -155,15 +156,26 @@ def copy_nn_to_material_params(fc2_output: ti.template()):
     """Extract E from NN output, map (-1,1) → (50, 800)."""
     for _ in range(1):
         out_E = fc2_output[0, 0, 0, 0]
-        E_pred[None] = 50.0 + (out_E + 1.0) * 0.5 * 750.0
+        E_pred[None] = cfg.E_MIN + (out_E + 1.0) * 0.5 * (
+            cfg.E_MAX - cfg.E_MIN)
+
+
+@ti.kernel
+def copy_nn_to_nu(fc2_output: ti.template()):
+    """Extract nu from NN output and map (-1, 1) to configured nu range."""
+    for _ in range(1):
+        out_nu = fc2_output[0, 0, 0, 0]
+        nu_pred[None] = cfg.NU_MIN + (out_nu + 1.0) * 0.5 * (
+            cfg.NU_MAX - cfg.NU_MIN)
 
 
 @ti.kernel
 def compute_lame_params():
-    """Compute Lamé parameters from E_pred with fixed ν."""
-    mu_tmp[None] = E_pred[None] / (2.0 * (1.0 + cfg.NU_FIXED))
-    lambda_tmp[None] = (E_pred[None] * cfg.NU_FIXED
-                        / ((1.0 + cfg.NU_FIXED) * (1.0 - 2.0 * cfg.NU_FIXED)))
+    """Compute Lamé parameters from the active E and nu fields."""
+    nu = ti.min(ti.max(nu_pred[None], cfg.NU_MIN), cfg.NU_MAX)
+    mu_tmp[None] = E_pred[None] / (2.0 * (1.0 + nu))
+    lambda_tmp[None] = (E_pred[None] * nu
+                        / ((1.0 + nu) * (1.0 - 2.0 * nu)))
 
 
 @ti.kernel

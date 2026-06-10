@@ -165,11 +165,19 @@ def plot_training_curves():
     log = load_npz("training_log.npz")
     epoch = log["epoch"]
     loss = log["loss"]
-    e_pred = log["E_pred"]
-    e_abs_error = log["E_abs_error"]
+    if "param_pred" in log:
+        learn_param = str(log["learn_param"].item())
+        param_pred = log["param_pred"]
+        param_abs_error = log["param_abs_error"]
+        param_true = float(log["E_true"] if learn_param == "E"
+                           else log["nu_true"])
+    else:
+        learn_param = "E"
+        param_pred = log["E_pred"]
+        param_abs_error = log["E_abs_error"]
+        param_true = float(log["E_true"])
     max_grad = log["max_grad"]
     epoch_time = log["epoch_time"]
-    e_true = float(log["E_true"])
 
     plt.figure(figsize=(7.2, 4.2))
     plt.semilogy(epoch, np.maximum(loss, 1e-16), color="#2458a6", linewidth=2)
@@ -180,20 +188,21 @@ def plot_training_curves():
     savefig("loss_curve.png", "nn")
 
     plt.figure(figsize=(7.2, 4.2))
-    plt.plot(epoch, e_pred, label="Predicted E", color="#1f8a70", linewidth=2)
-    plt.axhline(e_true, label=f"True E = {e_true:.1f}",
+    plt.plot(epoch, param_pred, label=f"Predicted {learn_param}",
+             color="#1f8a70", linewidth=2)
+    plt.axhline(param_true, label=f"True {learn_param} = {param_true:.4g}",
                 color="#c44536", linestyle="--", linewidth=1.8)
     plt.xlabel("Epoch")
-    plt.ylabel("Young's modulus E")
+    plt.ylabel(learn_param)
     plt.title("Material Parameter Convergence")
     plt.legend()
     plt.grid(True, alpha=0.28)
-    savefig("E_prediction_curve.png", "nn")
+    savefig("parameter_prediction_curve.png", "nn")
 
     fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
-    axes[0].semilogy(epoch, np.maximum(e_abs_error, 1e-8),
+    axes[0].semilogy(epoch, np.maximum(param_abs_error, 1e-8),
                      color="#c44536", linewidth=2)
-    axes[0].set_ylabel("|E_pred - E_true|")
+    axes[0].set_ylabel(f"|{learn_param}_pred - {learn_param}_true|")
     axes[0].set_title("Parameter Error")
     axes[0].grid(True, which="both", alpha=0.28)
     axes[1].plot(epoch, max_grad, color="#6a4c93", linewidth=2)

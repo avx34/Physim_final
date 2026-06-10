@@ -215,6 +215,8 @@ def main():
 
     e_true = float(target_data["E_true"]) if "E_true" in target_data else np.nan
     e_pred = float(pred_data["E_pred"]) if "E_pred" in pred_data else np.nan
+    nu_true = float(target_data["nu_true"]) if "nu_true" in target_data else np.nan
+    nu_pred = float(pred_data["nu_pred"]) if "nu_pred" in pred_data else nu_true
     warmup = int(target_data["warmup_steps"]) if "warmup_steps" in target_data else -1
 
     def draw(frame_id):
@@ -237,7 +239,8 @@ def main():
         canvas.scene(scene)
 
     print("\nTarget is cyan on the left; prediction is orange on the right.")
-    print(f"Target E={e_true:.3f}, predicted E={e_pred:.3f}, "
+    print(f"Target E={e_true:.3f}, nu={nu_true:.4f}; "
+          f"predicted E={e_pred:.3f}, nu={nu_pred:.4f}; "
           f"warmup_steps={warmup}")
     print(f"Loaded particle bounds: min={raw_min}, max={raw_max}")
 
