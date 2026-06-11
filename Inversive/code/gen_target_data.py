@@ -159,12 +159,16 @@ def substep():
 
         for i, j, k in ti.static(ti.ndrange(3, 3, 3)):
             offset = ti.Vector([i, j, k])
+            grid_idx = base + offset
             dpos = (offset.cast(float) - fx) * cfg.dx
             weight = w[i][0] * w[j][1] * w[k][2]
-            momentum = weight * (cfg.p_mass * v[p] + affine @ dpos
-                                 + penalty_force * cfg.dt)
-            grid_v[base + offset] += momentum
-            grid_m[base + offset] += weight * cfg.p_mass
+            if (grid_idx[0] >= 0 and grid_idx[0] < cfg.n_grid
+                    and grid_idx[1] >= 0 and grid_idx[1] < cfg.n_grid
+                    and grid_idx[2] >= 0 and grid_idx[2] < cfg.n_grid):
+                momentum = weight * (cfg.p_mass * v[p] + affine @ dpos
+                                     + penalty_force * cfg.dt)
+                grid_v[grid_idx] += momentum
+                grid_m[grid_idx] += weight * cfg.p_mass
 
     for i, j, k in grid_m:
         if grid_m[i, j, k] > 0.0:
@@ -184,11 +188,15 @@ def substep():
 
         for i, j, k in ti.static(ti.ndrange(3, 3, 3)):
             offset = ti.Vector([i, j, k])
+            grid_idx = base + offset
             dpos = offset.cast(float) - fx
             weight = w[i][0] * w[j][1] * w[k][2]
-            g_v = grid_v[base + offset]
-            new_v += weight * g_v
-            new_C += 4.0 * cfg.inv_dx * weight * g_v.outer_product(dpos)
+            if (grid_idx[0] >= 0 and grid_idx[0] < cfg.n_grid
+                    and grid_idx[1] >= 0 and grid_idx[1] < cfg.n_grid
+                    and grid_idx[2] >= 0 and grid_idx[2] < cfg.n_grid):
+                g_v = grid_v[grid_idx]
+                new_v += weight * g_v
+                new_C += 4.0 * cfg.inv_dx * weight * g_v.outer_product(dpos)
 
         v[p] = new_v
         C[p] = new_C
