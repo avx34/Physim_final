@@ -105,17 +105,43 @@ python code\inverse_train.py --train --learn_param both
 python code\inverse_train.py --infer --learn_param both
 ```
 
-The default learning rate is `3e-3`, which has worked better for both
-single-parameter and two-parameter experiments. Override it with `--lr` when
+The default learning rate is `3e-3`, override it with `--lr` when
 running ablations.
-    
-NN+FD evaluates the physical loss with forward MPM rollouts and estimates one
-finite-difference gradient per learned parameter. For `d` parameters, each
-training epoch costs roughly `2d + 1` forward simulations. A grid-style
-derivative-free baseline grows much faster with parameter dimension: even a
-modest `k` samples per parameter costs `k^d` simulations per grid level. This
-is why NN+FD still scales better for multi-parameter and noisy observation
-tasks, even though its finite-difference part is not free.
+
+Fast smoke test:
+
+```powershell
+python code\inverse_train.py --quick_test --tiny
+```
+
+## Method B: Derivative-Free Baseline
+
+This route does not use NN training or reverse-mode AD. It directly searches
+for material parameters whose forward simulation minimizes the same observable
+loss. The default `E` case uses the original 1D golden-section search; `nu` and
+`both` use a coarse-to-fine grid search.
+
+Estimate E with golden-section search:
+
+```powershell
+python code\optimize_E_search.py
+```
+
+Estimate both `E` and `nu` with the derivative-free baseline:
+
+```powershell
+python code\optimize_E_search.py --learn_param both --grid_size 7 --levels 3
+```
+
+## Analysis and Visualization
+
+Generate result plots:
+
+```powershell
+python code\plot_results.py --method nn
+python code\plot_results.py --method baseline
+python code\plot_results.py --method all
+```
 
 Generate the default Taichi collision-scene comparison video:
 
@@ -145,39 +171,6 @@ The optional non-scene renderer can still export frames when needed:
 
 ```powershell
 python code\render_trajectory_compare.py --format frames
-```
-
-Fast smoke test:
-
-```powershell
-python code\inverse_train.py --quick_test --tiny
-```
-
-## Method B: Derivative-Free Baseline
-
-This route does not use NN training or reverse-mode AD. It directly searches
-for material parameters whose forward simulation minimizes the same observable
-loss. The default `E` case uses the original 1D golden-section search; `nu` and
-`both` use a coarse-to-fine grid search.
-
-Estimate E with golden-section search:
-
-```powershell
-python code\optimize_E_search.py
-```
-
-Estimate both `E` and `nu` with the derivative-free baseline:
-
-```powershell
-python code\optimize_E_search.py --learn_param both --grid_size 7 --levels 3
-```
-
-Generate result plots:
-
-```powershell
-python code\plot_results.py --method nn
-python code\plot_results.py --method baseline
-python code\plot_results.py --method all
 ```
 
 NN plots are written to `Inversive\data\plots\nn\`; baseline plots are written
