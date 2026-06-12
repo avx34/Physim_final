@@ -11,7 +11,7 @@ from sim_config import cfg
 # ==============================================================================
 #  Material parameter fields
 # ==============================================================================
-E_pred = ti.field(dtype=float, shape=(), needs_grad=True)
+yield_min_pred = ti.field(dtype=float, shape=(), needs_grad=True)
 mu_tmp = ti.field(dtype=float, shape=(), needs_grad=True)
 lambda_tmp = ti.field(dtype=float, shape=(), needs_grad=True)
 
@@ -154,15 +154,15 @@ def init_from_target_data(data):
 def copy_nn_to_material_params(fc2_output: ti.template()):
     """Extract E from NN output, map (-1,1) → (50, 800)."""
     for _ in range(1):
-        out_E = fc2_output[0, 0, 0, 0]
-        E_pred[None] = 50.0 + (out_E + 1.0) * 0.5 * 750.0
+        out_val = fc2_output[0, 0, 0, 0]
+        yield_min_pred[None] = 0.8 + (out_val + 1.0) * 0.5 * 0.2
 
 
 @ti.kernel
 def compute_lame_params():
-    """Compute Lamé parameters from E_pred with fixed ν."""
-    mu_tmp[None] = E_pred[None] / (2.0 * (1.0 + cfg.NU_FIXED))
-    lambda_tmp[None] = (E_pred[None] * cfg.NU_FIXED
+    E_fixed = cfg.E_FIXED
+    mu_tmp[None] = E_fixed / (2.0 * (1.0 + cfg.NU_FIXED))
+    lambda_tmp[None] = (E_fixed * cfg.NU_FIXED
                         / ((1.0 + cfg.NU_FIXED) * (1.0 - 2.0 * cfg.NU_FIXED)))
 
 
@@ -183,7 +183,12 @@ def substep_p2g():
              0.75 - (fx - 1.0) ** 2,
              0.5 * (fx - 0.5) ** 2]
 
-        new_F = (ti.Matrix.identity(float, 3) + cfg.dt * C[p]) @ F[p]
+        F_trial = (ti.Matrix.identity(float, 3) + cfg.dt * C[p]) @ F[p]
+        U, Sigma, V = ti.svd(F_trial, ti.f32)
+        for i in ti.static(range(3)):
+            Sigma[i, i] = ti.max(yield_min_pred[None], ti.min(cfg.yield_max, Sigma[i, i]))
+        F_e = U @ Sigma @ V.transpose()
+        new_F = F_e
         F[p] = new_F
 
         J = new_F.determinant()

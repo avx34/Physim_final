@@ -1,4 +1,4 @@
-"""Create presentation-ready plots from inverse-simulation outputs.
+"""Create presentation-ready plots from inverse-simulation outputs for plasticity optimization.
 
 Examples:
 
@@ -45,46 +45,51 @@ def load_npz(name):
 
 
 def plot_baseline_search():
-    result_path = os.path.join(DATA_DIR, "E_search_result.npz")
+    # 变更点：文件名从 E_search 改为 yield_search
+    result_path = os.path.join(DATA_DIR, "yield_search_result.npz")
     if not os.path.exists(result_path):
-        print("Skip baseline plots: run `python code\\optimize_E_search.py`.")
+        print("Skip baseline plots: run `python code\\optimize_yield_search.py`.")
         return
 
-    result = load_npz("E_search_result.npz")
+    result = load_npz("yield_search_result.npz")
     evals = result["evaluations"]
     iters = result["iterations"]
-    e_true = float(result["E_true"])
-    best_e = float(result["best_E"])
+    
+    # 变更点：键名从 E_true/best_E 改为 yield_min_true/best_yield_min
+    yield_true = float(result["yield_min_true"])
+    best_yield = float(result["best_yield_min"])
     best_loss = float(result["best_loss"])
 
     order = np.argsort(evals[:, 0])
     plt.figure(figsize=(7.2, 4.2))
     plt.semilogy(evals[order, 0], np.maximum(evals[order, 1], 1e-16),
                  marker="o", color="#2458a6", linewidth=1.8)
-    plt.axvline(e_true, label=f"True E = {e_true:.1f}",
+    
+    # 变更点：图例与标签更新（格式化保留4位小数，因为塑性参数精度要求高）
+    plt.axvline(yield_true, label=f"True yield_min = {yield_true:.4f}",
                 color="#c44536", linestyle="--", linewidth=1.8)
-    plt.axvline(best_e, label=f"Best E = {best_e:.2f}",
+    plt.axvline(best_yield, label=f"Best yield_min = {best_yield:.4f}",
                 color="#1f8a70", linestyle=":", linewidth=2.0)
-    plt.xlabel("Young's modulus E")
+    plt.xlabel("Plasticity Yield Limit (yield_min)")
     plt.ylabel("Weighted loss (log scale)")
-    plt.title("Derivative-Free Search: E-Loss Samples")
+    plt.title("Derivative-Free Search: Yield-Loss Samples")
     plt.legend()
     plt.grid(True, which="both", alpha=0.28)
-    savefig("E_loss_samples.png", "baseline")
+    savefig("yield_loss_samples.png", "baseline")
 
     plt.figure(figsize=(7.2, 4.2))
     plt.plot(iters[:, 0], iters[:, 7], color="#1f8a70", linewidth=2,
-             label="Best E so far")
+             label="Best yield_min so far")
     plt.fill_between(iters[:, 0], iters[:, 1], iters[:, 2],
                      color="#2458a6", alpha=0.16, label="Search bracket")
-    plt.axhline(e_true, label=f"True E = {e_true:.1f}",
+    plt.axhline(yield_true, label=f"True yield_min = {yield_true:.4f}",
                 color="#c44536", linestyle="--", linewidth=1.8)
     plt.xlabel("Iteration")
-    plt.ylabel("Young's modulus E")
+    plt.ylabel("Plasticity Yield Limit (yield_min)")
     plt.title("Derivative-Free Search Convergence")
     plt.legend()
     plt.grid(True, alpha=0.28)
-    savefig("E_convergence.png", "baseline")
+    savefig("yield_convergence.png", "baseline")
 
     fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
     axes[0].semilogy(iters[:, 0], np.maximum(iters[:, 8], 1e-16),
@@ -136,7 +141,9 @@ def plot_baseline_search():
     axes[1, 1].set_ylabel("||F_mean error||_F")
     for ax in axes.flat:
         ax.grid(True, which="both", alpha=0.28)
-    fig.suptitle(f"Baseline Inference Summary: E={best_e:.3f}, "
+        
+    # 变更点：标题参数更新为 best_yield
+    fig.suptitle(f"Baseline Inference Summary: yield_min={best_yield:.4f}, "
                  f"loss={best_loss:.3e}")
     savefig("inference_summary.png", "baseline")
 
@@ -158,18 +165,20 @@ def plot_training_curves():
         plt.title("Training Loss")
         plt.grid(True, which="both", alpha=0.28)
         savefig("loss_curve.png", "nn")
-        print("Only loss_history.npy was found; rerun training to get E and "
+        print("Only loss_history.npy was found; rerun training to get yield_min and "
               "gradient diagnostic plots.")
         return
 
     log = load_npz("training_log.npz")
     epoch = log["epoch"]
     loss = log["loss"]
-    e_pred = log["E_pred"]
-    e_abs_error = log["E_abs_error"]
+    
+    # 变更点：从 training_log.npz 读取的键名更新为 yield_min_pred / yield_abs_error / yield_min_true
+    yield_pred = log["yield_min_pred"]
+    yield_abs_error = log["yield_abs_error"]
     max_grad = log["max_grad"]
     epoch_time = log["epoch_time"]
-    e_true = float(log["E_true"])
+    yield_true = float(log["yield_min_true"])
 
     plt.figure(figsize=(7.2, 4.2))
     plt.semilogy(epoch, np.maximum(loss, 1e-16), color="#2458a6", linewidth=2)
@@ -180,20 +189,21 @@ def plot_training_curves():
     savefig("loss_curve.png", "nn")
 
     plt.figure(figsize=(7.2, 4.2))
-    plt.plot(epoch, e_pred, label="Predicted E", color="#1f8a70", linewidth=2)
-    plt.axhline(e_true, label=f"True E = {e_true:.1f}",
+    plt.plot(epoch, yield_pred, label="Predicted yield_min", color="#1f8a70", linewidth=2)
+    plt.axhline(yield_true, label=f"True yield_min = {yield_true:.4f}",
                 color="#c44536", linestyle="--", linewidth=1.8)
     plt.xlabel("Epoch")
-    plt.ylabel("Young's modulus E")
+    plt.ylabel("Plasticity Yield Limit (yield_min)")
     plt.title("Material Parameter Convergence")
     plt.legend()
     plt.grid(True, alpha=0.28)
-    savefig("E_prediction_curve.png", "nn")
+    savefig("yield_prediction_curve.png", "nn")
 
     fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
-    axes[0].semilogy(epoch, np.maximum(e_abs_error, 1e-8),
+    # 变更点：因为 yield_min 的绝对误差尺度本身在 0~1，下限裁剪从 1e-8 适当调整到 1e-6 即可完美显示
+    axes[0].semilogy(epoch, np.maximum(yield_abs_error, 1e-6),
                      color="#c44536", linewidth=2)
-    axes[0].set_ylabel("|E_pred - E_true|")
+    axes[0].set_ylabel("|yield_pred - yield_true|")
     axes[0].set_title("Parameter Error")
     axes[0].grid(True, which="both", alpha=0.28)
     axes[1].plot(epoch, max_grad, color="#6a4c93", linewidth=2)

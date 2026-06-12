@@ -36,6 +36,10 @@ class SimConfig:
         self.ground_y = 0.1
         self.penalty_k = 1e5
         self.penalty_damp = 2e3
+        self.mu_friction = 0.4
+
+        # plasticity
+        self.yield_max = 1.05
 
         # Deterministic initial condition: removes per-epoch physical
         # initialization noise while keeping an irregular particle cloud.
@@ -45,13 +49,14 @@ class SimConfig:
         self.init_extent = 0.16
         self.init_v_y = -2.0
         self.init_seed = 42
-        self.warmup_steps = 170
+        self.warmup_steps = 150
 
-        # NN architecture  (ν is fixed — only E is learned)
-        self.n_input = 6
+        # NN architecture 
+        self.n_input = 7
         self.n_hidden = 32
         self.n_output = 1
         self.NU_FIXED = 0.4
+        self.E_FIXED = 400
 
         # derived (computed once at init)
         self._recompute_derived()

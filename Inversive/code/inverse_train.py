@@ -25,8 +25,8 @@ parser.add_argument("--epochs", type=int, default=100,
                     help="number of NN+FD training epochs")
 parser.add_argument("--lr", type=float, default=3e-4,
                     help="AdamW learning rate")
-parser.add_argument("--fd_eps", type=float, default=1.0,
-                    help="finite-difference epsilon for dL/dE")
+parser.add_argument("--fd_eps", type=float, default=0.005,
+                    help="finite-difference epsilon for dL/dyield_min")
 parser.add_argument("--resume", type=str, default="",
                     help="model directory for inference")
 args = parser.parse_args()
@@ -57,6 +57,7 @@ fc1: Linear = None
 fc2: Linear = None
 optimizer: AdamW = None
 
+yield_min_true = 0.75
 E_true = 200.0
 nu_true = 0.4
 target_data_npz = None
@@ -97,7 +98,7 @@ def init_nn_model():
 
 
 def load_target_data(path=None):
-    global E_true, nu_true, target_data_npz
+    global yield_min_true, nu_true, target_data_npz
     if path is None:
         path = os.path.join(DATA_DIR, "target_trajectory.npz")
 
@@ -106,7 +107,7 @@ def load_target_data(path=None):
     h_np = data["h"].astype(np.float32)[:cfg.n_steps]
     s_np = data["s"].astype(np.float32)[:cfg.n_steps]
     f_np = data["F_mean"].astype(np.float32)[:cfg.n_steps]
-    E_true = float(data["E_true"])
+    yield_min_true = float(data["yield_min_true"])
     nu_true = float(data["nu_true"])
 
     obs.target_h.from_numpy(h_np)
@@ -115,13 +116,14 @@ def load_target_data(path=None):
 
     features = np.zeros(cfg.n_input, dtype=np.float32)
     features[0] = h_np[0]
-    features[1] = h_np[-1]
+    features[1] = h_np.min()
     features[2] = h_np.max() - h_np.min()
     features[3] = np.mean([np.trace(s_np[t]) for t in range(h_np.shape[0])])
     features[4] = np.max([np.trace(s_np[t]) for t in range(h_np.shape[0])])
     features[5] = abs(h_np[-1] - h_np[0]) / max(
         h_np.shape[0] * cfg.substeps_per_step * cfg.dt, 1e-8)
     nn_input.from_numpy(features.reshape(1, 1, 1, cfg.n_input))
+    features[6] = f_np[:,:,:].min()
 
     print(f"Loaded target trajectory: {h_np.shape[0]} steps")
     print(f"  True params: E={E_true:.1f}, nu={nu_true:.3f}")
@@ -143,9 +145,9 @@ def run_obs_kernels(step):
     obs.accum_F(step)
 
 
-def forward_loss_for_E(E_value):
+def forward_loss_for_yield_min(yield_value):
     sim.init_from_target_data(target_data_npz)
-    sim.E_pred[None] = float(E_value)
+    sim.yield_min_pred[None] = float(yield_value)
     sim.compute_lame_params()
     obs.loss[None] = 0.0
 
@@ -158,23 +160,23 @@ def forward_loss_for_E(E_value):
     return float(obs.loss[None])
 
 
-def predict_E_from_nn():
+def predict_yield_min_from_nn():
     fc1.clear()
     fc2.clear()
     fc1.forward(0, nn_input)
     fc2.forward(0, fc1.output)
     sim.copy_nn_to_material_params(fc2.output)
-    return float(sim.E_pred[None])
+    return float(sim.yield_min_pred[None])
 
 
 @ti.kernel
-def set_surrogate_loss(dL_dE: float):
-    surrogate_loss[None] = dL_dE * sim.E_pred[None]
+def set_surrogate_loss(dL_dyield: float):
+    surrogate_loss[None] = dL_dyield * sim.yield_min_pred[None]
 
 
 def train():
     print("\n" + "=" * 72)
-    print("  NN + FINITE-DIFFERENCE PHYSICS GRADIENT")
+    print("  NN + FINITE-DIFFERENCE PHYSICS GRADIENT FOR PLASTICITY")
     print("=" * 72)
 
     max_epochs = 2 if args.quick_test else args.epochs
@@ -185,21 +187,21 @@ def train():
     print(f"  max_epochs = {max_epochs}")
     print(f"  lr = {args.lr:g}, fd_eps = {args.fd_eps:g}")
     print("-" * 72)
-    print(f"{'epoch':>5} {'loss':>12} {'E':>10} {'|E-E*|':>10} "
-          f"{'dL/dE':>12} {'time':>8}")
+    print(f"{'epoch':>5} {'loss':>12} {'yield':>10} {'|y-y*|':>10} "
+          f"{'dL/dy':>12} {'time':>8}")
     print("-" * 72)
 
     for epoch in range(max_epochs):
         epoch_start = time.perf_counter()
 
-        E_current = predict_E_from_nn()
-        loss_current = forward_loss_for_E(E_current)
-        loss_plus = forward_loss_for_E(E_current + args.fd_eps)
-        loss_minus = forward_loss_for_E(E_current - args.fd_eps)
-        dL_dE = (loss_plus - loss_minus) / (2.0 * args.fd_eps)
+        yield_current = predict_yield_min_from_nn()
+        loss_current = forward_loss_for_yield_min(yield_current)
+        loss_plus = forward_loss_for_yield_min(yield_current + args.fd_eps)
+        loss_minus = forward_loss_for_yield_min(yield_current - args.fd_eps)
+        dL_dyield = (loss_plus - loss_minus) / (2.0 * args.fd_eps)
 
         optimizer.zero_grad()
-        sim.zero_grad(sim.E_pred)
+        sim.zero_grad(sim.yield_min_pred)
         surrogate_loss[None] = 0.0
         surrogate_loss.grad[None] = 0.0
         fc1.clear()
@@ -211,7 +213,7 @@ def train():
             fc1.forward(0, nn_input)
             fc2.forward(0, fc1.output)
             sim.copy_nn_to_material_params(fc2.output)
-            set_surrogate_loss(float(dL_dE))
+            set_surrogate_loss(float(dL_dyield))
 
         g_max = 0.0
         for w in params:
@@ -223,24 +225,24 @@ def train():
         optimizer.step()
         optimizer.zero_grad()
 
-        E_after = predict_E_from_nn()
+        yield_after = predict_yield_min_from_nn()
         epoch_time = time.perf_counter() - epoch_start
         losses.append(loss_current)
         train_log.append((
             epoch,
             float(loss_current),
-            E_after,
-            abs(E_after - E_true),
+            yield_after,
+            abs(yield_after - yield_min_true),
             float(g_max),
             float(epoch_time),
         ))
 
         if epoch % 5 == 0 or epoch == max_epochs - 1:
-            print(f"{epoch:5d} {loss_current:12.4e} {E_after:10.3f} "
-                  f"{abs(E_after - E_true):10.3f} {dL_dE:12.4e} "
+            print(f"{epoch:5d} {loss_current:12.4e} {yield_after:10.4f} "
+                  f"{abs(yield_after - yield_min_true):10.4f} {dL_dyield:12.4e} "
                   f"{epoch_time:8.2f}")
 
-        if abs(dL_dE) < 1e-8:
+        if abs(dL_dyield) < 1e-8:
             print(f"  [STOP] finite-difference gradient is tiny at epoch {epoch}")
             break
 
@@ -255,11 +257,11 @@ def train():
         np.savez(os.path.join(DATA_DIR, "training_log.npz"),
                  epoch=train_log_arr[:, 0],
                  loss=train_log_arr[:, 1],
-                 E_pred=train_log_arr[:, 2],
-                 E_abs_error=train_log_arr[:, 3],
+                 yield_min_pred=train_log_arr[:, 2],
+                 yield_abs_error=train_log_arr[:, 3],
                  max_grad=train_log_arr[:, 4],
                  epoch_time=train_log_arr[:, 5],
-                 E_true=np.float32(E_true),
+                 yield_min_true=np.float32(yield_min_true),
                  nu_true=np.float32(nu_true),
                  mode="nn_fd")
 
@@ -274,12 +276,12 @@ def infer():
     print("  NN+FD INFERENCE")
     print("=" * 72)
 
-    E_pred = predict_E_from_nn()
-    print(f"NN predicted: E={E_pred:.4f}")
-    print(f"True:         E={E_true:.4f}")
+    yield_pred = predict_yield_min_from_nn()
+    print(f"NN predicted: yield_min={yield_pred:.4f}")
+    print(f"True:         yield_min={yield_min_true:.4f}")
 
     sim.init_from_target_data(target_data_npz)
-    sim.E_pred[None] = E_pred
+    sim.yield_min_pred[None] = yield_pred
     sim.compute_lame_params()
 
     pred_h = np.zeros(cfg.n_steps, dtype=np.float32)
@@ -314,8 +316,8 @@ def infer():
              target_h=target_h,
              target_s=target_s,
              target_F_mean=target_f,
-             E_pred=np.float32(E_pred),
-             E_true=np.float32(E_true),
+             yield_min_pred=np.float32(yield_pred),
+             yield_min_true=np.float32(yield_min_true),
              nu_true=np.float32(nu_true),
              mse_h=np.float32(mse_h),
              mse_s=np.float32(mse_s),

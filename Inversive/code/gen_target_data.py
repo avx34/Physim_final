@@ -13,6 +13,8 @@ import os
 import numpy as np
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--yield_min", type=float, default=0.95,
+                    help="target plasticity yield minimum constraint (e.g., 0.6 ~ 1.0)")
 parser.add_argument("--E", type=float, default=400.0,
                     help="target Young's modulus")
 parser.add_argument("--nu", type=float, default=0.4,
@@ -29,7 +31,9 @@ import taichi as ti
 from sim_config import cfg, DATA_DIR
 
 # True material params — what the inverse system tries to recover
-E_true, nu_true = args.E, args.nu
+yield_min_true = args.yield_min
+E_true = args.E
+nu_true = args.nu
 mu_0_true = E_true / (2.0 * (1.0 + nu_true))
 lambda_0_true = E_true * nu_true / ((1.0 + nu_true) * (1.0 - 2.0 * nu_true))
 
@@ -136,7 +140,12 @@ def substep():
              0.75 - (fx - 1.0) ** 2,
              0.5 * (fx - 0.5) ** 2]
 
-        new_F = (ti.Matrix.identity(float, 3) + cfg.dt * C[p]) @ F[p]
+        F_trial = (ti.Matrix.identity(float, 3) + cfg.dt * C[p]) @ F[p]
+        U, Sigma, V = ti.svd(F_trial, ti.f32)
+        for i in ti.static(range(3)):
+            Sigma[i, i] = ti.max(yield_min_true, ti.min(cfg.yield_max, Sigma[i, i]))
+        F_e = U @ Sigma @ V.transpose()
+        new_F = F_e
         F[p] = new_F
 
         J = new_F.determinant()
@@ -253,7 +262,7 @@ if __name__ == "__main__":
 
     payload = dict(h=h_arr, s=s_arr, F_mean=F_arr,
                    x0=x0, v0=v0, C0=C0, F0=F0,
-                   E_true=E_true, nu_true=nu_true,
+                   yield_min_true=yield_min_true, nu_true=nu_true,
                    dt=cfg.dt, substeps_per_step=cfg.substeps_per_step,
                    n_steps=cfg.n_steps,
                    warmup_steps=args.warmup_steps)
