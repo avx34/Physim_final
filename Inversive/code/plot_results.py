@@ -45,21 +45,41 @@ def load_npz(name):
 
 
 def plot_baseline_search():
-    result_path = os.path.join(DATA_DIR, "E_search_result.npz")
+    result_path = os.path.join(DATA_DIR, "baseline_search_result.npz")
+    if not os.path.exists(result_path):
+        result_path = os.path.join(DATA_DIR, "E_search_result.npz")
     if not os.path.exists(result_path):
         print("Skip baseline plots: run `python code\\optimize_E_search.py`.")
         return
 
-    result = load_npz("E_search_result.npz")
+    result = np.load(result_path)
     evals = result["evaluations"]
     iters = result["iterations"]
     e_true = float(result["E_true"])
+    nu_true = float(result["nu_true"]) if "nu_true" in result else 0.4
     best_e = float(result["best_E"])
+    best_nu = float(result["best_nu"]) if "best_nu" in result else nu_true
     best_loss = float(result["best_loss"])
+    learn_param = (str(result["learn_param"].item())
+                   if "learn_param" in result else "E")
+    legacy_1d = "learn_param" not in result and evals.shape[1] < 6
+    best_e_col = 7 if legacy_1d else 5
+    best_nu_col = 6
+    best_loss_col = 8 if legacy_1d else 7
+    width_col = 9 if legacy_1d else 8
 
-    order = np.argsort(evals[:, 0])
+    if evals.shape[1] >= 6:
+        e_vals = evals[:, 0]
+        nu_vals = evals[:, 1]
+        losses = evals[:, 2]
+    else:
+        e_vals = evals[:, 0]
+        nu_vals = np.full_like(e_vals, nu_true)
+        losses = evals[:, 1]
+
+    order = np.argsort(e_vals)
     plt.figure(figsize=(7.2, 4.2))
-    plt.semilogy(evals[order, 0], np.maximum(evals[order, 1], 1e-16),
+    plt.semilogy(e_vals[order], np.maximum(losses[order], 1e-16),
                  marker="o", color="#2458a6", linewidth=1.8)
     plt.axvline(e_true, label=f"True E = {e_true:.1f}",
                 color="#c44536", linestyle="--", linewidth=1.8)
@@ -72,11 +92,46 @@ def plot_baseline_search():
     plt.grid(True, which="both", alpha=0.28)
     savefig("E_loss_samples.png", "baseline")
 
+    if learn_param in ("nu", "both"):
+        plt.figure(figsize=(7.2, 4.2))
+        plt.scatter(nu_vals, np.maximum(losses, 1e-16), c=e_vals,
+                    cmap="viridis", s=42, edgecolors="none")
+        plt.yscale("log")
+        plt.axvline(nu_true, label=f"True nu = {nu_true:.4f}",
+                    color="#c44536", linestyle="--", linewidth=1.8)
+        plt.axvline(best_nu, label=f"Best nu = {best_nu:.4f}",
+                    color="#1f8a70", linestyle=":", linewidth=2.0)
+        plt.xlabel("Poisson ratio nu")
+        plt.ylabel("Weighted loss (log scale)")
+        plt.title("Derivative-Free Search: nu-Loss Samples")
+        plt.colorbar(label="E sample")
+        plt.legend()
+        plt.grid(True, which="both", alpha=0.28)
+        savefig("nu_loss_samples.png", "baseline")
+
+    if learn_param == "both":
+        plt.figure(figsize=(7.2, 5.4))
+        sc = plt.scatter(e_vals, nu_vals, c=np.log10(np.maximum(losses, 1e-16)),
+                         cmap="magma_r", s=54, edgecolors="none")
+        plt.scatter([e_true], [nu_true], marker="x", s=90,
+                    color="#c44536", label="True")
+        plt.scatter([best_e], [best_nu], marker="o", s=70,
+                    facecolors="none", edgecolors="#1f8a70",
+                    linewidths=2, label="Best")
+        plt.xlabel("Young's modulus E")
+        plt.ylabel("Poisson ratio nu")
+        plt.title("2D Baseline Search Samples")
+        plt.colorbar(sc, label="log10 weighted loss")
+        plt.legend()
+        plt.grid(True, alpha=0.28)
+        savefig("E_nu_loss_samples.png", "baseline")
+
     plt.figure(figsize=(7.2, 4.2))
-    plt.plot(iters[:, 0], iters[:, 7], color="#1f8a70", linewidth=2,
+    plt.plot(iters[:, 0], iters[:, best_e_col], color="#1f8a70", linewidth=2,
              label="Best E so far")
-    plt.fill_between(iters[:, 0], iters[:, 1], iters[:, 2],
-                     color="#2458a6", alpha=0.16, label="Search bracket")
+    if learn_param == "E":
+        plt.fill_between(iters[:, 0], iters[:, 1], iters[:, 2],
+                         color="#2458a6", alpha=0.16, label="Search bracket")
     plt.axhline(e_true, label=f"True E = {e_true:.1f}",
                 color="#c44536", linestyle="--", linewidth=1.8)
     plt.xlabel("Iteration")
@@ -86,16 +141,31 @@ def plot_baseline_search():
     plt.grid(True, alpha=0.28)
     savefig("E_convergence.png", "baseline")
 
+    if learn_param in ("nu", "both"):
+        plt.figure(figsize=(7.2, 4.2))
+        plt.plot(iters[:, 0], iters[:, best_nu_col], color="#6a4c93", linewidth=2,
+                 label="Best nu so far")
+        plt.axhline(nu_true, label=f"True nu = {nu_true:.4f}",
+                    color="#c44536", linestyle="--", linewidth=1.8)
+        plt.xlabel("Iteration")
+        plt.ylabel("Poisson ratio nu")
+        plt.title("Derivative-Free Search: nu Convergence")
+        plt.legend()
+        plt.grid(True, alpha=0.28)
+        savefig("nu_convergence.png", "baseline")
+
     fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
-    axes[0].semilogy(iters[:, 0], np.maximum(iters[:, 8], 1e-16),
+    axes[0].semilogy(iters[:, 0], np.maximum(iters[:, best_loss_col], 1e-16),
                      color="#6a4c93", linewidth=2)
     axes[0].set_ylabel("Best loss")
     axes[0].set_title("Baseline Loss and Bracket Width")
     axes[0].grid(True, which="both", alpha=0.28)
-    axes[1].semilogy(iters[:, 0], np.maximum(iters[:, 9], 1e-12),
+    width = (iters[:, width_col] if legacy_1d
+             else np.maximum(iters[:, 8], iters[:, 9]))
+    axes[1].semilogy(iters[:, 0], np.maximum(width, 1e-12),
                      color="#dd7f20", linewidth=2)
     axes[1].set_xlabel("Iteration")
-    axes[1].set_ylabel("Bracket width")
+    axes[1].set_ylabel("Search width")
     axes[1].grid(True, which="both", alpha=0.28)
     savefig("search_diagnostics.png", "baseline")
 
@@ -137,7 +207,7 @@ def plot_baseline_search():
     for ax in axes.flat:
         ax.grid(True, which="both", alpha=0.28)
     fig.suptitle(f"Baseline Inference Summary: E={best_e:.3f}, "
-                 f"loss={best_loss:.3e}")
+                 f"nu={best_nu:.4f}, loss={best_loss:.3e}")
     savefig("inference_summary.png", "baseline")
 
 
@@ -165,49 +235,109 @@ def plot_training_curves():
     log = load_npz("training_log.npz")
     epoch = log["epoch"]
     loss = log["loss"]
-    e_pred = log["E_pred"]
-    e_abs_error = log["E_abs_error"]
+    if "param_pred" in log:
+        learn_param = str(log["learn_param"].item())
+        param_pred = log["param_pred"]
+        param_abs_error = log["param_abs_error"]
+        param_true = float(log["E_true"] if learn_param == "E"
+                           else log["nu_true"])
+    else:
+        learn_param = "E"
+        param_pred = log["E_pred"]
+        param_abs_error = log["E_abs_error"]
+        param_true = float(log["E_true"])
     max_grad = log["max_grad"]
     epoch_time = log["epoch_time"]
-    e_true = float(log["E_true"])
+    e_pred = log["E_pred"] if "E_pred" in log else None
+    nu_pred = log["nu_pred"] if "nu_pred" in log else None
+    e_true = float(log["E_true"]) if "E_true" in log else None
+    nu_true = float(log["nu_true"]) if "nu_true" in log else None
+    lr = float(log["lr"]) if "lr" in log else None
+    fd_eps_E = float(log["fd_eps_E"]) if "fd_eps_E" in log else None
+    fd_eps_nu = float(log["fd_eps_nu"]) if "fd_eps_nu" in log else None
+    if lr is None:
+        run_label = f"learn_param={learn_param}"
+    elif learn_param == "both":
+        run_label = (f"learn_param=both, lr={lr:g}, "
+                     f"eps_E={fd_eps_E:g}, eps_nu={fd_eps_nu:g}")
+    else:
+        eps = fd_eps_E if learn_param == "E" else fd_eps_nu
+        run_label = f"learn_param={learn_param}, lr={lr:g}, eps={eps:g}"
 
     plt.figure(figsize=(7.2, 4.2))
     plt.semilogy(epoch, np.maximum(loss, 1e-16), color="#2458a6", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Loss (log scale)")
-    plt.title("Training Loss")
+    plt.title(f"Training Loss ({run_label})")
     plt.grid(True, which="both", alpha=0.28)
     savefig("loss_curve.png", "nn")
 
-    plt.figure(figsize=(7.2, 4.2))
-    plt.plot(epoch, e_pred, label="Predicted E", color="#1f8a70", linewidth=2)
-    plt.axhline(e_true, label=f"True E = {e_true:.1f}",
-                color="#c44536", linestyle="--", linewidth=1.8)
-    plt.xlabel("Epoch")
-    plt.ylabel("Young's modulus E")
-    plt.title("Material Parameter Convergence")
-    plt.legend()
-    plt.grid(True, alpha=0.28)
-    savefig("E_prediction_curve.png", "nn")
+    if learn_param == "both" and e_pred is not None and nu_pred is not None:
+        fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.2), sharex=True)
+        axes[0].plot(epoch, e_pred, label="Predicted E",
+                     color="#1f8a70", linewidth=2)
+        axes[0].axhline(e_true, label=f"True E = {e_true:.4g}",
+                        color="#c44536", linestyle="--", linewidth=1.8)
+        axes[0].set_ylabel("E")
+        axes[0].set_title(f"Material Parameter Convergence ({run_label})")
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.28)
+        axes[1].plot(epoch, nu_pred, label="Predicted nu",
+                     color="#6a4c93", linewidth=2)
+        axes[1].axhline(nu_true, label=f"True nu = {nu_true:.4g}",
+                        color="#c44536", linestyle="--", linewidth=1.8)
+        axes[1].set_xlabel("Epoch")
+        axes[1].set_ylabel("nu")
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.28)
+        savefig("parameter_prediction_curve.png", "nn")
 
-    fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
-    axes[0].semilogy(epoch, np.maximum(e_abs_error, 1e-8),
-                     color="#c44536", linewidth=2)
-    axes[0].set_ylabel("|E_pred - E_true|")
-    axes[0].set_title("Parameter Error")
-    axes[0].grid(True, which="both", alpha=0.28)
-    axes[1].plot(epoch, max_grad, color="#6a4c93", linewidth=2)
-    axes[1].set_xlabel("Epoch")
-    axes[1].set_ylabel("max |gradient|")
-    axes[1].set_title("Gradient Diagnostic")
-    axes[1].grid(True, alpha=0.28)
-    savefig("training_diagnostics.png", "nn")
+        fig, axes = plt.subplots(3, 1, figsize=(7.2, 7.5), sharex=True)
+        axes[0].semilogy(epoch, np.maximum(np.abs(e_pred - e_true), 1e-8),
+                         color="#c44536", linewidth=2)
+        axes[0].set_ylabel("|E error|")
+        axes[0].set_title(f"Parameter Errors and Gradient Diagnostic ({run_label})")
+        axes[0].grid(True, which="both", alpha=0.28)
+        axes[1].semilogy(epoch, np.maximum(np.abs(nu_pred - nu_true), 1e-8),
+                         color="#1f8a70", linewidth=2)
+        axes[1].set_ylabel("|nu error|")
+        axes[1].grid(True, which="both", alpha=0.28)
+        axes[2].plot(epoch, max_grad, color="#6a4c93", linewidth=2)
+        axes[2].set_xlabel("Epoch")
+        axes[2].set_ylabel("max |gradient|")
+        axes[2].grid(True, alpha=0.28)
+        savefig("training_diagnostics.png", "nn")
+    else:
+        plt.figure(figsize=(7.2, 4.2))
+        plt.plot(epoch, param_pred, label=f"Predicted {learn_param}",
+                 color="#1f8a70", linewidth=2)
+        plt.axhline(param_true, label=f"True {learn_param} = {param_true:.4g}",
+                    color="#c44536", linestyle="--", linewidth=1.8)
+        plt.xlabel("Epoch")
+        plt.ylabel(learn_param)
+        plt.title(f"Material Parameter Convergence ({run_label})")
+        plt.legend()
+        plt.grid(True, alpha=0.28)
+        savefig("parameter_prediction_curve.png", "nn")
+
+        fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True)
+        axes[0].semilogy(epoch, np.maximum(param_abs_error, 1e-8),
+                         color="#c44536", linewidth=2)
+        axes[0].set_ylabel(f"|{learn_param}_pred - {learn_param}_true|")
+        axes[0].set_title(f"Parameter Error ({run_label})")
+        axes[0].grid(True, which="both", alpha=0.28)
+        axes[1].plot(epoch, max_grad, color="#6a4c93", linewidth=2)
+        axes[1].set_xlabel("Epoch")
+        axes[1].set_ylabel("max |gradient|")
+        axes[1].set_title("Gradient Diagnostic")
+        axes[1].grid(True, alpha=0.28)
+        savefig("training_diagnostics.png", "nn")
 
     plt.figure(figsize=(7.2, 4.2))
     plt.plot(epoch, epoch_time, color="#dd7f20", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Seconds")
-    plt.title("Epoch Runtime")
+    plt.title(f"Epoch Runtime ({run_label})")
     plt.grid(True, alpha=0.28)
     savefig("epoch_runtime.png", "nn")
 
@@ -293,6 +423,49 @@ def plot_inference_curves():
     savefig("inference_summary.png", "nn")
 
 
+def plot_method_comparison():
+    pred_path = os.path.join(DATA_DIR, "predicted_trajectory.npz")
+    baseline_path = os.path.join(DATA_DIR, "baseline_search_result.npz")
+    if not os.path.exists(pred_path) or not os.path.exists(baseline_path):
+        print("Skip method comparison: need NN inference and baseline result.")
+        return
+
+    nn = load_npz("predicted_trajectory.npz")
+    baseline = load_npz("baseline_search_result.npz")
+    e_true = float(nn["E_true"])
+    nu_true = float(nn["nu_true"])
+    nn_e = float(nn["E_pred"])
+    nn_nu = float(nn["nu_pred"])
+    base_e = float(baseline["best_E"])
+    base_nu = float(baseline["best_nu"])
+    nn_loss = (float(nn["mse_h"])
+               + 10.0 * float(nn["mse_s"])
+               + 5.0 * float(nn["mse_F"]))
+    base_loss = float(baseline["best_loss"])
+
+    methods = ["NN+FD", "Baseline"]
+    e_errors = [abs(nn_e - e_true), abs(base_e - e_true)]
+    nu_errors = [abs(nn_nu - nu_true), abs(base_nu - nu_true)]
+    losses = [nn_loss, base_loss]
+
+    fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.8))
+    axes[0].bar(methods, e_errors, color=["#1f8a70", "#2458a6"])
+    axes[0].set_title("E Error")
+    axes[0].set_ylabel("|E_pred - E_true|")
+    axes[1].bar(methods, nu_errors, color=["#1f8a70", "#2458a6"])
+    axes[1].set_title("nu Error")
+    axes[1].set_ylabel("|nu_pred - nu_true|")
+    axes[2].bar(methods, np.maximum(losses, 1e-16),
+                color=["#1f8a70", "#2458a6"])
+    axes[2].set_yscale("log")
+    axes[2].set_title("Weighted Observable Loss")
+    axes[2].set_ylabel("Loss")
+    for ax in axes:
+        ax.grid(True, axis="y", alpha=0.28)
+    fig.suptitle("NN+FD vs Derivative-Free Baseline")
+    savefig("method_comparison.png", "comparison")
+
+
 def main():
     ensure_plot_dir()
     if args.method in ("nn", "all"):
@@ -300,6 +473,9 @@ def main():
         plot_inference_curves()
     if args.method in ("baseline", "all"):
         plot_baseline_search()
+    if args.method == "all":
+        os.makedirs(os.path.join(PLOT_DIR, "comparison"), exist_ok=True)
+        plot_method_comparison()
     print(f"All plots are in {PLOT_DIR}")
 
 

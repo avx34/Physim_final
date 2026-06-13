@@ -12,6 +12,7 @@ from sim_config import cfg
 #  Material parameter fields
 # ==============================================================================
 E_pred = ti.field(dtype=float, shape=(), needs_grad=True)
+nu_pred = ti.field(dtype=float, shape=(), needs_grad=True)
 mu_tmp = ti.field(dtype=float, shape=(), needs_grad=True)
 lambda_tmp = ti.field(dtype=float, shape=(), needs_grad=True)
 
@@ -155,15 +156,38 @@ def copy_nn_to_material_params(fc2_output: ti.template()):
     """Extract E from NN output, map (-1,1) → (50, 800)."""
     for _ in range(1):
         out_E = fc2_output[0, 0, 0, 0]
-        E_pred[None] = 50.0 + (out_E + 1.0) * 0.5 * 750.0
+        E_pred[None] = cfg.E_MIN + (out_E + 1.0) * 0.5 * (
+            cfg.E_MAX - cfg.E_MIN)
+
+
+@ti.kernel
+def copy_nn_to_nu(fc2_output: ti.template()):
+    """Extract nu from NN output and map (-1, 1) to configured nu range."""
+    for _ in range(1):
+        out_nu = fc2_output[0, 0, 0, 0]
+        nu_pred[None] = cfg.NU_MIN + (out_nu + 1.0) * 0.5 * (
+            cfg.NU_MAX - cfg.NU_MIN)
+
+
+@ti.kernel
+def copy_nn_to_E_nu(fc2_output: ti.template()):
+    """Extract E and nu from a two-output NN head."""
+    for _ in range(1):
+        out_E = fc2_output[0, 0, 0, 0]
+        out_nu = fc2_output[0, 0, 0, 1]
+        E_pred[None] = cfg.E_MIN + (out_E + 1.0) * 0.5 * (
+            cfg.E_MAX - cfg.E_MIN)
+        nu_pred[None] = cfg.NU_MIN + (out_nu + 1.0) * 0.5 * (
+            cfg.NU_MAX - cfg.NU_MIN)
 
 
 @ti.kernel
 def compute_lame_params():
-    """Compute Lamé parameters from E_pred with fixed ν."""
-    mu_tmp[None] = E_pred[None] / (2.0 * (1.0 + cfg.NU_FIXED))
-    lambda_tmp[None] = (E_pred[None] * cfg.NU_FIXED
-                        / ((1.0 + cfg.NU_FIXED) * (1.0 - 2.0 * cfg.NU_FIXED)))
+    """Compute Lamé parameters from the active E and nu fields."""
+    nu = ti.min(ti.max(nu_pred[None], cfg.NU_MIN), cfg.NU_MAX)
+    mu_tmp[None] = E_pred[None] / (2.0 * (1.0 + nu))
+    lambda_tmp[None] = (E_pred[None] * nu
+                        / ((1.0 + nu) * (1.0 - 2.0 * nu)))
 
 
 @ti.kernel
@@ -207,12 +231,16 @@ def substep_p2g():
 
         for i, j, k in ti.static(ti.ndrange(3, 3, 3)):
             offset = ti.Vector([i, j, k])
+            grid_idx = base + offset
             dpos = (ti.cast(offset, float) - fx) * cfg.dx
             weight = w[i][0] * w[j][1] * w[k][2]
-            momentum = weight * (cfg.p_mass * v[p] + affine @ dpos
-                                 + penalty_force * cfg.dt)
-            grid_v[base + offset] += momentum
-            grid_m[base + offset] += weight * cfg.p_mass
+            if (grid_idx[0] >= 0 and grid_idx[0] < cfg.n_grid
+                    and grid_idx[1] >= 0 and grid_idx[1] < cfg.n_grid
+                    and grid_idx[2] >= 0 and grid_idx[2] < cfg.n_grid):
+                momentum = weight * (cfg.p_mass * v[p] + affine @ dpos
+                                     + penalty_force * cfg.dt)
+                grid_v[grid_idx] += momentum
+                grid_m[grid_idx] += weight * cfg.p_mass
 
 
 @ti.kernel
@@ -233,11 +261,15 @@ def substep_grid_g2p():
         new_C = ti.Matrix.zero(float, 3, 3)
         for i, j, k in ti.static(ti.ndrange(3, 3, 3)):
             offset = ti.Vector([i, j, k])
+            grid_idx = base + offset
             dpos = ti.cast(offset, float) - fx
             weight = w[i][0] * w[j][1] * w[k][2]
-            g_v = grid_v[base + offset]
-            new_v += weight * g_v
-            new_C += 4.0 * cfg.inv_dx * weight * g_v.outer_product(dpos)
+            if (grid_idx[0] >= 0 and grid_idx[0] < cfg.n_grid
+                    and grid_idx[1] >= 0 and grid_idx[1] < cfg.n_grid
+                    and grid_idx[2] >= 0 and grid_idx[2] < cfg.n_grid):
+                g_v = grid_v[grid_idx]
+                new_v += weight * g_v
+                new_C += 4.0 * cfg.inv_dx * weight * g_v.outer_product(dpos)
         v[p] = new_v
         C[p] = new_C
         x[p] += cfg.dt * v[p]

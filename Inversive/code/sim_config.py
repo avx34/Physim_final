@@ -31,6 +31,10 @@ class SimConfig:
 
         # material
         self.p_rho = 1.0
+        self.E_MIN = 50.0
+        self.E_MAX = 800.0
+        self.NU_MIN = 0.05
+        self.NU_MAX = 0.49
 
         # collision
         self.ground_y = 0.1
@@ -47,11 +51,9 @@ class SimConfig:
         self.init_seed = 42
         self.warmup_steps = 170
 
-        # NN architecture  (ν is fixed — only E is learned)
         self.n_input = 6
         self.n_hidden = 32
         self.n_output = 1
-        self.NU_FIXED = 0.4
 
         # derived (computed once at init)
         self._recompute_derived()

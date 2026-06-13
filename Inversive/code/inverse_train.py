@@ -10,11 +10,10 @@ import argparse
 import os
 import time
 import numpy as np
-import taichi as ti
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--train", action="store_true",
-                    help="train the NN to predict Young's modulus")
+                    help="train the NN to predict one material parameter")
 parser.add_argument("--infer", action="store_true",
                     help="run inference with a trained NN")
 parser.add_argument("--quick_test", action="store_true",
@@ -23,18 +22,37 @@ parser.add_argument("--tiny", action="store_true",
                     help="run with fewer particles/steps for smoke testing")
 parser.add_argument("--epochs", type=int, default=100,
                     help="number of NN+FD training epochs")
-parser.add_argument("--lr", type=float, default=3e-4,
-                    help="AdamW learning rate")
-parser.add_argument("--fd_eps", type=float, default=1.0,
-                    help="finite-difference epsilon for dL/dE")
+parser.add_argument("--lr", type=float, default=None,
+                    help="AdamW learning rate; defaults to 3e-3")
+parser.add_argument("--fd_eps", type=float, default=None,
+                    help="legacy finite-difference epsilon for single-parameter runs")
+parser.add_argument("--fd_eps_E", type=float, default=1.0,
+                    help="finite-difference epsilon for Young's modulus")
+parser.add_argument("--fd_eps_nu", type=float, default=1e-3,
+                    help="finite-difference epsilon for Poisson ratio")
+parser.add_argument("--learn_param", choices=("E", "nu", "both"), default="E",
+                    help="material parameter(s) to infer")
 parser.add_argument("--resume", type=str, default="",
                     help="model directory for inference")
 args = parser.parse_args()
 
+if args.lr is None:
+    args.lr = 3e-3
+
+if args.fd_eps is not None:
+    if args.learn_param == "nu":
+        args.fd_eps_nu = args.fd_eps
+    else:
+        args.fd_eps_E = args.fd_eps
+
 TRAIN = args.train or args.quick_test
 INFER = args.infer
 
+import taichi as ti
 import sim_config as scfg
+
+if args.learn_param == "both":
+    scfg.cfg.n_output = 2
 
 scfg.cfg.init_taichi()
 
@@ -48,6 +66,8 @@ from nn_layers import Linear, AdamW
 cfg = scfg.cfg
 DATA_DIR = scfg.DATA_DIR
 MODEL_DIR = scfg.MODEL_DIR
+ACTIVE_MODEL_DIR = (MODEL_DIR if args.learn_param == "E"
+                    else os.path.join(DATA_DIR, f"trained_model_{args.learn_param}"))
 
 nn_input = ti.field(dtype=float, shape=(1, 1, 1, cfg.n_input),
                     needs_grad=False)
@@ -85,7 +105,7 @@ def init_nn_model():
         print(f"NN initialised. Params: {n_params}, lr={args.lr:g}")
         return
 
-    model_dir = args.resume or MODEL_DIR
+    model_dir = args.resume or ACTIVE_MODEL_DIR
     p1 = os.path.join(model_dir, "fc1.pkl")
     p2 = os.path.join(model_dir, "fc2.pkl")
     if not os.path.exists(p1) or not os.path.exists(p2):
@@ -94,6 +114,47 @@ def init_nn_model():
     fc1.load_weights(p1, model_id=0)
     fc2.load_weights(p2, model_id=0)
     print(f"Model loaded from {model_dir}/")
+
+
+def active_param_names():
+    if args.learn_param == "both":
+        return ("E", "nu")
+    return (args.learn_param,)
+
+
+def true_param_values():
+    if args.learn_param == "E":
+        return np.array([E_true], dtype=np.float32)
+    if args.learn_param == "nu":
+        return np.array([nu_true], dtype=np.float32)
+    return np.array([E_true, nu_true], dtype=np.float32)
+
+
+def current_param_values():
+    if args.learn_param == "E":
+        return np.array([float(sim.E_pred[None])], dtype=np.float32)
+    if args.learn_param == "nu":
+        return np.array([float(sim.nu_pred[None])], dtype=np.float32)
+    return np.array([float(sim.E_pred[None]), float(sim.nu_pred[None])],
+                    dtype=np.float32)
+
+
+def active_bounds_and_eps():
+    table = {
+        "E": (cfg.E_MIN, cfg.E_MAX, args.fd_eps_E),
+        "nu": (cfg.NU_MIN, cfg.NU_MAX, args.fd_eps_nu),
+    }
+    return [table[name] for name in active_param_names()]
+
+
+def set_material_params(E_value=None, nu_value=None):
+    if E_value is None:
+        E_value = E_true
+    if nu_value is None:
+        nu_value = nu_true
+    sim.E_pred[None] = float(E_value)
+    sim.nu_pred[None] = float(nu_value)
+    sim.compute_lame_params()
 
 
 def load_target_data(path=None):
@@ -143,10 +204,19 @@ def run_obs_kernels(step):
     obs.accum_F(step)
 
 
-def forward_loss_for_E(E_value):
+def unpack_active_params(param_values):
+    values = np.asarray(param_values, dtype=np.float32).reshape(-1)
+    if args.learn_param == "E":
+        return float(values[0]), float(nu_true)
+    if args.learn_param == "nu":
+        return float(E_true), float(values[0])
+    return float(values[0]), float(values[1])
+
+
+def forward_loss_for_params(param_values):
     sim.init_from_target_data(target_data_npz)
-    sim.E_pred[None] = float(E_value)
-    sim.compute_lame_params()
+    E_value, nu_value = unpack_active_params(param_values)
+    set_material_params(E_value, nu_value)
     obs.loss[None] = 0.0
 
     for step in range(cfg.n_steps):
@@ -158,18 +228,57 @@ def forward_loss_for_E(E_value):
     return float(obs.loss[None])
 
 
-def predict_E_from_nn():
+def copy_nn_to_active_param():
+    if args.learn_param == "E":
+        sim.copy_nn_to_material_params(fc2.output)
+        sim.nu_pred[None] = float(nu_true)
+    elif args.learn_param == "nu":
+        sim.copy_nn_to_nu(fc2.output)
+        sim.E_pred[None] = float(E_true)
+    else:
+        sim.copy_nn_to_E_nu(fc2.output)
+
+
+def predict_params_from_nn():
     fc1.clear()
     fc2.clear()
     fc1.forward(0, nn_input)
     fc2.forward(0, fc1.output)
-    sim.copy_nn_to_material_params(fc2.output)
-    return float(sim.E_pred[None])
+    copy_nn_to_active_param()
+    return current_param_values()
 
 
 @ti.kernel
-def set_surrogate_loss(dL_dE: float):
-    surrogate_loss[None] = dL_dE * sim.E_pred[None]
+def set_surrogate_loss_E(dL_dparam: float):
+    surrogate_loss[None] = dL_dparam * sim.E_pred[None]
+
+
+@ti.kernel
+def set_surrogate_loss_nu(dL_dparam: float):
+    surrogate_loss[None] = dL_dparam * sim.nu_pred[None]
+
+
+@ti.kernel
+def set_surrogate_loss_E_nu(dL_dE: float, dL_dnu: float):
+    surrogate_loss[None] = dL_dE * sim.E_pred[None] + dL_dnu * sim.nu_pred[None]
+
+
+def finite_difference_gradient(param_values):
+    param_values = np.asarray(param_values, dtype=np.float32).reshape(-1)
+    grad = np.zeros_like(param_values)
+    loss_current = forward_loss_for_params(param_values)
+    for i, (lo, hi, eps) in enumerate(active_bounds_and_eps()):
+        plus = param_values.copy()
+        minus = param_values.copy()
+        plus[i] = min(hi, float(param_values[i] + eps))
+        minus[i] = max(lo, float(param_values[i] - eps))
+        if plus[i] == minus[i]:
+            grad[i] = 0.0
+            continue
+        loss_plus = forward_loss_for_params(plus)
+        loss_minus = forward_loss_for_params(minus)
+        grad[i] = (loss_plus - loss_minus) / (plus[i] - minus[i])
+    return loss_current, grad
 
 
 def train():
@@ -183,23 +292,23 @@ def train():
     train_log = []
 
     print(f"  max_epochs = {max_epochs}")
-    print(f"  lr = {args.lr:g}, fd_eps = {args.fd_eps:g}")
+    print(f"  learn_param = {args.learn_param}")
+    print(f"  lr = {args.lr:g}, fd_eps_E = {args.fd_eps_E:g}, "
+          f"fd_eps_nu = {args.fd_eps_nu:g}")
     print("-" * 72)
-    print(f"{'epoch':>5} {'loss':>12} {'E':>10} {'|E-E*|':>10} "
-          f"{'dL/dE':>12} {'time':>8}")
+    print(f"{'epoch':>5} {'loss':>12} {'E':>10} {'nu':>9} "
+          f"{'|dE|':>10} {'|dnu|':>9} {'|grad|':>10} {'time':>8}")
     print("-" * 72)
 
     for epoch in range(max_epochs):
         epoch_start = time.perf_counter()
 
-        E_current = predict_E_from_nn()
-        loss_current = forward_loss_for_E(E_current)
-        loss_plus = forward_loss_for_E(E_current + args.fd_eps)
-        loss_minus = forward_loss_for_E(E_current - args.fd_eps)
-        dL_dE = (loss_plus - loss_minus) / (2.0 * args.fd_eps)
+        param_current = predict_params_from_nn()
+        loss_current, dL_dparams = finite_difference_gradient(param_current)
 
         optimizer.zero_grad()
         sim.zero_grad(sim.E_pred)
+        sim.zero_grad(sim.nu_pred)
         surrogate_loss[None] = 0.0
         surrogate_loss.grad[None] = 0.0
         fc1.clear()
@@ -210,8 +319,14 @@ def train():
         with ti.ad.Tape(loss=surrogate_loss):
             fc1.forward(0, nn_input)
             fc2.forward(0, fc1.output)
-            sim.copy_nn_to_material_params(fc2.output)
-            set_surrogate_loss(float(dL_dE))
+            copy_nn_to_active_param()
+            if args.learn_param == "E":
+                set_surrogate_loss_E(float(dL_dparams[0]))
+            elif args.learn_param == "nu":
+                set_surrogate_loss_nu(float(dL_dparams[0]))
+            else:
+                set_surrogate_loss_E_nu(float(dL_dparams[0]),
+                                        float(dL_dparams[1]))
 
         g_max = 0.0
         for w in params:
@@ -223,30 +338,47 @@ def train():
         optimizer.step()
         optimizer.zero_grad()
 
-        E_after = predict_E_from_nn()
+        param_after = predict_params_from_nn()
+        E_after = float(sim.E_pred[None])
+        nu_after = float(sim.nu_pred[None])
+        E_err = abs(E_after - E_true)
+        nu_err = abs(nu_after - nu_true)
+        grad_norm = float(np.linalg.norm(dL_dparams))
+        grad_E = float(dL_dparams[0]) if args.learn_param in ("E", "both") else 0.0
+        grad_nu = (float(dL_dparams[0]) if args.learn_param == "nu"
+                   else float(dL_dparams[1]) if args.learn_param == "both"
+                   else 0.0)
         epoch_time = time.perf_counter() - epoch_start
         losses.append(loss_current)
         train_log.append((
             epoch,
             float(loss_current),
-            E_after,
-            abs(E_after - E_true),
+            float(param_after[0]),
+            float(np.linalg.norm(param_after - true_param_values())),
             float(g_max),
             float(epoch_time),
+            E_after,
+            nu_after,
+            E_err,
+            nu_err,
+            grad_norm,
+            grad_E,
+            grad_nu,
         ))
 
         if epoch % 5 == 0 or epoch == max_epochs - 1:
             print(f"{epoch:5d} {loss_current:12.4e} {E_after:10.3f} "
-                  f"{abs(E_after - E_true):10.3f} {dL_dE:12.4e} "
+                  f"{nu_after:9.4f} {E_err:10.3f} {nu_err:9.4f} "
+                  f"{grad_norm:10.3e} "
                   f"{epoch_time:8.2f}")
 
-        if abs(dL_dE) < 1e-8:
+        if grad_norm < 1e-8:
             print(f"  [STOP] finite-difference gradient is tiny at epoch {epoch}")
             break
 
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    fc1.dump_weights(os.path.join(MODEL_DIR, "fc1.pkl"))
-    fc2.dump_weights(os.path.join(MODEL_DIR, "fc2.pkl"))
+    os.makedirs(ACTIVE_MODEL_DIR, exist_ok=True)
+    fc1.dump_weights(os.path.join(ACTIVE_MODEL_DIR, "fc1.pkl"))
+    fc2.dump_weights(os.path.join(ACTIVE_MODEL_DIR, "fc2.pkl"))
     np.save(os.path.join(DATA_DIR, "loss_history.npy"),
             np.array(losses, dtype=np.float32))
 
@@ -255,16 +387,31 @@ def train():
         np.savez(os.path.join(DATA_DIR, "training_log.npz"),
                  epoch=train_log_arr[:, 0],
                  loss=train_log_arr[:, 1],
-                 E_pred=train_log_arr[:, 2],
-                 E_abs_error=train_log_arr[:, 3],
+                 param_pred=train_log_arr[:, 2],
+                 param_abs_error=train_log_arr[:, 3],
                  max_grad=train_log_arr[:, 4],
                  epoch_time=train_log_arr[:, 5],
+                 E_pred=train_log_arr[:, 6],
+                 nu_pred=train_log_arr[:, 7],
+                 E_abs_error=train_log_arr[:, 8],
+                 nu_abs_error=train_log_arr[:, 9],
+                 fd_grad_norm=train_log_arr[:, 10],
+                 fd_grad_E=train_log_arr[:, 11],
+                 fd_grad_nu=train_log_arr[:, 12],
                  E_true=np.float32(E_true),
                  nu_true=np.float32(nu_true),
+                 learn_param=args.learn_param,
+                 lr=np.float32(args.lr),
+                 fd_eps_E=np.float32(args.fd_eps_E),
+                 fd_eps_nu=np.float32(args.fd_eps_nu),
+                 max_epochs=np.int32(max_epochs),
+                 n_input=np.int32(cfg.n_input),
+                 n_hidden=np.int32(cfg.n_hidden),
+                 n_output=np.int32(cfg.n_output),
                  mode="nn_fd")
 
     print("-" * 72)
-    print(f"Model saved to {MODEL_DIR}/")
+    print(f"Model saved to {ACTIVE_MODEL_DIR}/")
     print(f"Training log saved to {DATA_DIR}/training_log.npz")
     return losses
 
@@ -274,13 +421,16 @@ def infer():
     print("  NN+FD INFERENCE")
     print("=" * 72)
 
-    E_pred = predict_E_from_nn()
-    print(f"NN predicted: E={E_pred:.4f}")
-    print(f"True:         E={E_true:.4f}")
+    param_pred = predict_params_from_nn()
+    E_pred = float(sim.E_pred[None])
+    nu_pred = float(sim.nu_pred[None])
+    print(f"Learned parameter: {args.learn_param}")
+    print(f"NN predicted: E={E_pred:.4f}, nu={nu_pred:.5f}")
+    print(f"True:         E={E_true:.4f}, nu={nu_true:.5f}")
 
     sim.init_from_target_data(target_data_npz)
-    sim.E_pred[None] = E_pred
-    sim.compute_lame_params()
+    E_value, nu_value = unpack_active_params(param_pred)
+    set_material_params(E_value, nu_value)
 
     pred_h = np.zeros(cfg.n_steps, dtype=np.float32)
     pred_s = np.zeros((cfg.n_steps, 3, 3), dtype=np.float32)
@@ -315,8 +465,14 @@ def infer():
              target_s=target_s,
              target_F_mean=target_f,
              E_pred=np.float32(E_pred),
+             nu_pred=np.float32(nu_pred),
              E_true=np.float32(E_true),
              nu_true=np.float32(nu_true),
+             learn_param=args.learn_param,
+             model_dir=ACTIVE_MODEL_DIR,
+             lr=np.float32(args.lr),
+             fd_eps_E=np.float32(args.fd_eps_E),
+             fd_eps_nu=np.float32(args.fd_eps_nu),
              mse_h=np.float32(mse_h),
              mse_s=np.float32(mse_s),
              mse_F=np.float32(mse_f))
