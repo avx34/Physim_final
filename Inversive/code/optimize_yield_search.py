@@ -1,7 +1,7 @@
-"""Estimate Young's modulus with derivative-free 1D search.
+"""Estimate plasticity yield limit (yield_min) with derivative-free 1D search.
 
-This avoids Taichi reverse-mode AD entirely. It is a robust baseline for the
-current inverse problem because only one material parameter, E, is unknown.
+This avoids Taichi reverse-mode AD and finite-difference gradients entirely. 
+It uses golden-section search as a robust global optimization baseline.
 """
 import argparse
 import os
@@ -10,11 +10,13 @@ import numpy as np
 
 import sim_config as scfg
 
-
 parser = argparse.ArgumentParser()
-parser.add_argument("--lo", type=float, default=50.0)
-parser.add_argument("--hi", type=float, default=800.0)
-parser.add_argument("--iters", type=int, default=24)
+parser.add_argument("--lo", type=float, default=0.8,
+                    help="Lower bound of golden section search for yield_min")
+parser.add_argument("--hi", type=float, default=1.0,
+                    help="Upper bound of golden section search for yield_min")
+parser.add_argument("--iters", type=int, default=24,
+                    help="Number of search iterations")
 args = parser.parse_args()
 
 scfg.cfg.init_taichi()
@@ -32,11 +34,12 @@ def load_target_data():
     path = os.path.join(DATA_DIR, "target_trajectory.npz")
     data = np.load(path)
     target_data_npz = data
+    
     return (
         data["h"].astype(np.float32)[:cfg.n_steps],
         data["s"].astype(np.float32)[:cfg.n_steps],
         data["F_mean"].astype(np.float32)[:cfg.n_steps],
-        float(data["E_true"]),
+        float(data["yield_min_true"]),
     )
 
 
@@ -50,9 +53,10 @@ def run_obs_kernels(step):
     obs.accum_F(step)
 
 
-def forward_observables(E_value):
+def forward_observables(yield_value):
     sim.init_from_target_data(target_data_npz)
-    sim.E_pred[None] = float(E_value)
+    
+    sim.yield_min_pred[None] = float(yield_value)
     sim.compute_lame_params()
 
     pred_h = np.zeros(cfg.n_steps, dtype=np.float32)
@@ -78,28 +82,28 @@ def weighted_loss(pred_h, pred_s, pred_f, target_h, target_s, target_f):
     return float(total), float(h_loss), float(s_loss), float(f_loss)
 
 
-def evaluate(E_value, target_h, target_s, target_f):
-    pred_h, pred_s, pred_f = forward_observables(E_value)
+def evaluate(yield_value, target_h, target_s, target_f):
+    pred_h, pred_s, pred_f = forward_observables(yield_value)
     return weighted_loss(pred_h, pred_s, pred_f, target_h, target_s, target_f)
 
 
-def print_header(E_true):
+def print_header(yield_min_true):
     print("\n" + "=" * 72)
-    print("  DERIVATIVE-FREE INVERSE BASELINE")
+    print("  DERIVATIVE-FREE INVERSE BASELINE (PLASTICITY)")
     print("=" * 72)
-    print(f"  objective: recover Young's modulus E")
-    print(f"  target E:  {E_true:.6g}")
-    print(f"  method:    golden-section search on forward simulation loss")
-    print(f"  bracket:   [{args.lo:.6g}, {args.hi:.6g}]")
-    print(f"  iters:     {args.iters}")
+    print(f"  objective: recover plasticity yield limit (yield_min)")
+    print(f"  target yield_min:  {yield_min_true:.6f}")
+    print(f"  method:     golden-section search on forward simulation loss")
+    print(f"  bracket:    [{args.lo:.6f}, {args.hi:.6f}]")
+    print(f"  iters:      {args.iters}")
     print("-" * 72)
-    print(f"{'it':>3} {'lo':>10} {'hi':>10} {'best_E':>10} "
+    print(f"{'it':>3} {'lo':>10} {'hi':>10} {'best_yield':>12} "
           f"{'best_loss':>12} {'width':>10} {'time':>8}")
     print("-" * 72)
 
 
 def main():
-    target_h, target_s, target_f, E_true = load_target_data()
+    target_h, target_s, target_f, yield_min_true = load_target_data()
     lo, hi = args.lo, args.hi
     phi = (1.0 + np.sqrt(5.0)) / 2.0
     inv_phi = 1.0 / phi
@@ -110,9 +114,9 @@ def main():
     fd, hd, sd, Fd = evaluate(d, target_h, target_s, target_f)
     eval_rows = [(c, fc, hc, sc, Fc), (d, fd, hd, sd, Fd)]
     iter_rows = []
-    best_E, best_loss = (c, fc) if fc < fd else (d, fd)
+    best_yield, best_loss = (c, fc) if fc < fd else (d, fd)
 
-    print_header(E_true)
+    print_header(yield_min_true)
     for it in range(args.iters):
         start = time.perf_counter()
         if fc < fd:
@@ -130,32 +134,34 @@ def main():
             fd, hd, sd, Fd = evaluate(d, target_h, target_s, target_f)
             eval_rows.append((d, fd, hd, sd, Fd))
 
-        best_E, best_loss = min([(best_E, best_loss), (c, fc), (d, fd)],
-                                key=lambda row: row[1])
+        best_yield, best_loss = min([(best_yield, best_loss), (c, fc), (d, fd)],
+                                   key=lambda row: row[1])
         elapsed = time.perf_counter() - start
         width = hi - lo
         iter_rows.append((it, lo, hi, c, fc, d, fd,
-                          best_E, best_loss, width, elapsed))
-        print(f"{it:3d} {lo:10.4f} {hi:10.4f} {best_E:10.4f} "
+                          best_yield, best_loss, width, elapsed))
+        
+        print(f"{it:3d} {lo:10.4f} {hi:10.4f} {best_yield:12.4f} "
               f"{best_loss:12.4e} {width:10.4f} {elapsed:8.2f}")
 
-    pred_h, pred_s, pred_f = forward_observables(best_E)
+    pred_h, pred_s, pred_f = forward_observables(best_yield)
     best_total, best_h, best_s, best_f = weighted_loss(
         pred_h, pred_s, pred_f, target_h, target_s, target_f)
 
     eval_out = np.array(eval_rows, dtype=np.float32)
     iter_out = np.array(iter_rows, dtype=np.float32)
     os.makedirs(DATA_DIR, exist_ok=True)
-    out_path = os.path.join(DATA_DIR, "E_search_result.npz")
+    
+    out_path = os.path.join(DATA_DIR, "yield_search_result.npz")
     np.savez(out_path,
              evaluations=eval_out,
              iterations=iter_out,
-             best_E=np.float32(best_E),
+             best_yield_min=np.float32(best_yield),
              best_loss=np.float32(best_total),
              best_h_loss=np.float32(best_h),
              best_s_loss=np.float32(best_s),
              best_F_loss=np.float32(best_f),
-             E_true=np.float32(E_true),
+             yield_min_true=np.float32(yield_min_true),
              pred_h=pred_h,
              pred_s=pred_s,
              pred_F_mean=pred_f,
@@ -163,15 +169,14 @@ def main():
              target_s=target_s,
              target_F_mean=target_f)
 
-    # Compatibility with earlier plotting/inspection snippets.
-    np.save(os.path.join(DATA_DIR, "E_search_log.npy"), eval_out[:, :2])
+    np.save(os.path.join(DATA_DIR, "yield_search_log.npy"), eval_out[:, :2])
 
     print("-" * 72)
-    print(f"  best E:      {best_E:.8g}")
-    print(f"  true E:      {E_true:.8g}")
-    print(f"  abs error:   {abs(best_E - E_true):.8g}")
-    print(f"  final loss:  {best_total:.8g}")
-    print(f"  saved:       {out_path}")
+    print(f"  best yield_min:  {best_yield:.6f}")
+    print(f"  true yield_min:  {yield_min_true:.6f}")
+    print(f"  abs error:       {abs(best_yield - yield_min_true):.6f}")
+    print(f"  final loss:      {best_total:.8e}")
+    print(f"  saved:           {out_path}")
     print("=" * 72 + "\n")
 
 
