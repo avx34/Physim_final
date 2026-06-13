@@ -62,6 +62,13 @@ def plot_baseline_search():
     best_loss = float(result["best_loss"])
     learn_param = (str(result["learn_param"].item())
                    if "learn_param" in result else "E")
+    obs_mode = str(result["obs_mode"].item()) if "obs_mode" in result else "full"
+    obs_alpha_h = float(result["obs_alpha_h"]) if "obs_alpha_h" in result else 1.0
+    obs_alpha_s = float(result["obs_alpha_s"]) if "obs_alpha_s" in result else None
+    obs_alpha_F = float(result["obs_alpha_F"]) if "obs_alpha_F" in result else None
+    obs_label = (obs_mode if obs_alpha_s is None else
+                 f"{obs_mode}, a_h={obs_alpha_h:g}, "
+                 f"a_s={obs_alpha_s:g}, a_F={obs_alpha_F:g}")
     legacy_1d = "learn_param" not in result and evals.shape[1] < 6
     best_e_col = 7 if legacy_1d else 5
     best_nu_col = 6
@@ -87,7 +94,7 @@ def plot_baseline_search():
                 color="#1f8a70", linestyle=":", linewidth=2.0)
     plt.xlabel("Young's modulus E")
     plt.ylabel("Weighted loss (log scale)")
-    plt.title("Derivative-Free Search: E-Loss Samples")
+    plt.title(f"Derivative-Free Search: E-Loss Samples ({obs_label})")
     plt.legend()
     plt.grid(True, which="both", alpha=0.28)
     savefig("E_loss_samples.png", "baseline")
@@ -103,7 +110,7 @@ def plot_baseline_search():
                     color="#1f8a70", linestyle=":", linewidth=2.0)
         plt.xlabel("Poisson ratio nu")
         plt.ylabel("Weighted loss (log scale)")
-        plt.title("Derivative-Free Search: nu-Loss Samples")
+        plt.title(f"Derivative-Free Search: nu-Loss Samples ({obs_label})")
         plt.colorbar(label="E sample")
         plt.legend()
         plt.grid(True, which="both", alpha=0.28)
@@ -120,7 +127,7 @@ def plot_baseline_search():
                     linewidths=2, label="Best")
         plt.xlabel("Young's modulus E")
         plt.ylabel("Poisson ratio nu")
-        plt.title("2D Baseline Search Samples")
+        plt.title(f"2D Baseline Search Samples ({obs_label})")
         plt.colorbar(sc, label="log10 weighted loss")
         plt.legend()
         plt.grid(True, alpha=0.28)
@@ -136,7 +143,7 @@ def plot_baseline_search():
                 color="#c44536", linestyle="--", linewidth=1.8)
     plt.xlabel("Iteration")
     plt.ylabel("Young's modulus E")
-    plt.title("Derivative-Free Search Convergence")
+    plt.title(f"Derivative-Free Search Convergence ({obs_label})")
     plt.legend()
     plt.grid(True, alpha=0.28)
     savefig("E_convergence.png", "baseline")
@@ -149,7 +156,7 @@ def plot_baseline_search():
                     color="#c44536", linestyle="--", linewidth=1.8)
         plt.xlabel("Iteration")
         plt.ylabel("Poisson ratio nu")
-        plt.title("Derivative-Free Search: nu Convergence")
+        plt.title(f"Derivative-Free Search: nu Convergence ({obs_label})")
         plt.legend()
         plt.grid(True, alpha=0.28)
         savefig("nu_convergence.png", "baseline")
@@ -158,7 +165,7 @@ def plot_baseline_search():
     axes[0].semilogy(iters[:, 0], np.maximum(iters[:, best_loss_col], 1e-16),
                      color="#6a4c93", linewidth=2)
     axes[0].set_ylabel("Best loss")
-    axes[0].set_title("Baseline Loss and Bracket Width")
+    axes[0].set_title(f"Baseline Loss and Bracket Width ({obs_label})")
     axes[0].grid(True, which="both", alpha=0.28)
     width = (iters[:, width_col] if legacy_1d
              else np.maximum(iters[:, 8], iters[:, 9]))
@@ -255,14 +262,22 @@ def plot_training_curves():
     lr = float(log["lr"]) if "lr" in log else None
     fd_eps_E = float(log["fd_eps_E"]) if "fd_eps_E" in log else None
     fd_eps_nu = float(log["fd_eps_nu"]) if "fd_eps_nu" in log else None
+    obs_mode = str(log["obs_mode"].item()) if "obs_mode" in log else "full"
+    obs_alpha_h = float(log["obs_alpha_h"]) if "obs_alpha_h" in log else 1.0
+    obs_alpha_s = float(log["obs_alpha_s"]) if "obs_alpha_s" in log else None
+    obs_alpha_F = float(log["obs_alpha_F"]) if "obs_alpha_F" in log else None
+    obs_label = (obs_mode if obs_alpha_s is None else
+                 f"{obs_mode}, a_h={obs_alpha_h:g}, "
+                 f"a_s={obs_alpha_s:g}, a_F={obs_alpha_F:g}")
     if lr is None:
-        run_label = f"learn_param={learn_param}"
+        run_label = f"learn_param={learn_param}, obs={obs_label}"
     elif learn_param == "both":
-        run_label = (f"learn_param=both, lr={lr:g}, "
+        run_label = (f"learn_param=both, obs={obs_label}, lr={lr:g}, "
                      f"eps_E={fd_eps_E:g}, eps_nu={fd_eps_nu:g}")
     else:
         eps = fd_eps_E if learn_param == "E" else fd_eps_nu
-        run_label = f"learn_param={learn_param}, lr={lr:g}, eps={eps:g}"
+        run_label = (f"learn_param={learn_param}, obs={obs_label}, "
+                     f"lr={lr:g}, eps={eps:g}")
 
     plt.figure(figsize=(7.2, 4.2))
     plt.semilogy(epoch, np.maximum(loss, 1e-16), color="#2458a6", linewidth=2)
@@ -356,9 +371,18 @@ def plot_inference_curves():
     pred_h = pred["h"]
     pred_s = pred["s"]
     pred_F = pred["F_mean"]
-    target_h = target["h"][:pred_h.shape[0]]
-    target_s = target["s"][:pred_s.shape[0]]
-    target_F = target["F_mean"][:pred_F.shape[0]]
+    target_h = (pred["target_h"][:pred_h.shape[0]]
+                if "target_h" in pred else target["h"][:pred_h.shape[0]])
+    target_s = (pred["target_s"][:pred_s.shape[0]]
+                if "target_s" in pred else target["s"][:pred_s.shape[0]])
+    target_F = (pred["target_F_mean"][:pred_F.shape[0]]
+                if "target_F_mean" in pred else target["F_mean"][:pred_F.shape[0]])
+    clean_h = (target["h_clean"][:pred_h.shape[0]]
+               if "h_clean" in target else None)
+    clean_s = (target["s_clean"][:pred_s.shape[0]]
+               if "s_clean" in target else None)
+    clean_F = (target["F_mean_clean"][:pred_F.shape[0]]
+               if "F_mean_clean" in target else None)
     steps = np.arange(pred_h.shape[0])
 
     s_err = np.linalg.norm(pred_s - target_s, axis=(1, 2))
@@ -366,7 +390,13 @@ def plot_inference_curves():
     h_err = np.abs(pred_h - target_h)
 
     plt.figure(figsize=(7.2, 4.2))
-    plt.plot(steps, target_h, label="Target", color="#222222", linewidth=2)
+    if clean_h is not None:
+        plt.plot(steps, clean_h, label="Clean target",
+                 color="#777777", linewidth=1.8)
+        plt.plot(steps, target_h, label="Noisy target",
+                 color="#222222", linewidth=2, alpha=0.78)
+    else:
+        plt.plot(steps, target_h, label="Target", color="#222222", linewidth=2)
     plt.plot(steps, pred_h, label="Predicted", color="#1f8a70",
              linewidth=2, linestyle="--")
     plt.xlabel("Timestep")
@@ -375,6 +405,24 @@ def plot_inference_curves():
     plt.legend()
     plt.grid(True, alpha=0.28)
     savefig("height_target_vs_predicted.png", "nn")
+
+    if clean_h is not None and clean_s is not None and clean_F is not None:
+        noise_h = np.abs(target_h - clean_h)
+        noise_s = np.linalg.norm(target_s - clean_s, axis=(1, 2))
+        noise_F = np.linalg.norm(target_F - clean_F, axis=(1, 2))
+        plt.figure(figsize=(7.2, 4.2))
+        plt.semilogy(steps, np.maximum(noise_h, 1e-16), label="|h noise|",
+                     color="#2458a6", linewidth=2)
+        plt.semilogy(steps, np.maximum(noise_s, 1e-16),
+                     label="||s noise||_F", color="#c44536", linewidth=2)
+        plt.semilogy(steps, np.maximum(noise_F, 1e-16),
+                     label="||F_mean noise||_F", color="#6a4c93", linewidth=2)
+        plt.xlabel("Timestep")
+        plt.ylabel("Noise magnitude (log scale)")
+        plt.title("Injected Target Observation Noise")
+        plt.legend()
+        plt.grid(True, which="both", alpha=0.28)
+        savefig("target_noise_profile.png", "nn")
 
     plt.figure(figsize=(7.2, 4.2))
     plt.semilogy(steps, np.maximum(h_err, 1e-16), label="|h error|",
@@ -409,8 +457,14 @@ def plot_inference_curves():
     axes[1, 0].set_xlabel("Timestep")
     axes[1, 0].set_ylabel("||F_mean error||_F")
 
-    axes[1, 1].plot(steps, target_h, label="Target",
-                    color="#222222", linewidth=2)
+    if clean_h is not None:
+        axes[1, 1].plot(steps, clean_h, label="Clean target",
+                        color="#777777", linewidth=1.8)
+        axes[1, 1].plot(steps, target_h, label="Noisy target",
+                        color="#222222", linewidth=2, alpha=0.78)
+    else:
+        axes[1, 1].plot(steps, target_h, label="Target",
+                        color="#222222", linewidth=2)
     axes[1, 1].plot(steps, pred_h, label="Predicted",
                     color="#1f8a70", linewidth=2, linestyle="--")
     axes[1, 1].set_title("Height Trajectory")
@@ -432,23 +486,45 @@ def plot_method_comparison():
 
     nn = load_npz("predicted_trajectory.npz")
     baseline = load_npz("baseline_search_result.npz")
+    train_log = (load_npz("training_log.npz")
+                 if os.path.exists(os.path.join(DATA_DIR, "training_log.npz"))
+                 else None)
     e_true = float(nn["E_true"])
     nu_true = float(nn["nu_true"])
     nn_e = float(nn["E_pred"])
     nn_nu = float(nn["nu_pred"])
     base_e = float(baseline["best_E"])
     base_nu = float(baseline["best_nu"])
-    nn_loss = (float(nn["mse_h"])
+    nn_loss = (float(nn["weighted_loss"]) if "weighted_loss" in nn
+               else float(nn["mse_h"])
                + 10.0 * float(nn["mse_s"])
                + 5.0 * float(nn["mse_F"]))
     base_loss = float(baseline["best_loss"])
+    nn_obs = str(nn["obs_mode"].item()) if "obs_mode" in nn else "full"
+    base_obs = (str(baseline["obs_mode"].item())
+                if "obs_mode" in baseline else "full")
+    if train_log is not None:
+        nn_runtime = (float(train_log["train_runtime_sec"])
+                      if "train_runtime_sec" in train_log
+                      else float(np.sum(train_log["epoch_time"])))
+        nn_evals = (int(train_log["n_forward_evals"])
+                    if "n_forward_evals" in train_log else None)
+    else:
+        nn_runtime = np.nan
+        nn_evals = None
+    base_runtime = (float(baseline["runtime_sec"])
+                    if "runtime_sec" in baseline else
+                    float(np.sum(baseline["iterations"][:, -1])))
+    base_evals = (int(baseline["n_forward_evals"])
+                  if "n_forward_evals" in baseline else None)
 
     methods = ["NN+FD", "Baseline"]
     e_errors = [abs(nn_e - e_true), abs(base_e - e_true)]
     nu_errors = [abs(nn_nu - nu_true), abs(base_nu - nu_true)]
     losses = [nn_loss, base_loss]
+    runtimes = [nn_runtime, base_runtime]
 
-    fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.8))
+    fig, axes = plt.subplots(1, 4, figsize=(13.2, 3.8))
     axes[0].bar(methods, e_errors, color=["#1f8a70", "#2458a6"])
     axes[0].set_title("E Error")
     axes[0].set_ylabel("|E_pred - E_true|")
@@ -460,9 +536,18 @@ def plot_method_comparison():
     axes[2].set_yscale("log")
     axes[2].set_title("Weighted Observable Loss")
     axes[2].set_ylabel("Loss")
+    bars = axes[3].bar(methods, runtimes, color=["#1f8a70", "#2458a6"])
+    axes[3].set_title("Runtime")
+    axes[3].set_ylabel("Seconds")
+    for bar, evals in zip(bars, [nn_evals, base_evals]):
+        if evals is not None:
+            axes[3].text(bar.get_x() + bar.get_width() / 2,
+                         bar.get_height(), f"{evals} evals",
+                         ha="center", va="bottom", fontsize=8)
     for ax in axes:
         ax.grid(True, axis="y", alpha=0.28)
-    fig.suptitle("NN+FD vs Derivative-Free Baseline")
+    fig.suptitle(f"NN+FD vs Derivative-Free Baseline "
+                 f"(NN obs={nn_obs}, baseline obs={base_obs})")
     savefig("method_comparison.png", "comparison")
 
 

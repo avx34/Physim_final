@@ -23,6 +23,15 @@ parser.add_argument("--grid_size", type=int, default=7,
                     help="samples per axis for grid-based searches")
 parser.add_argument("--levels", type=int, default=3,
                     help="coarse-to-fine levels for grid-based searches")
+parser.add_argument("--obs_mode", choices=("full", "external", "height"),
+                    default="external",
+                    help="loss observables: external=0.1h+1000s, full=h+10s+5F, height=h")
+parser.add_argument("--obs_alpha_h", type=float, default=None,
+                    help="override height loss weight")
+parser.add_argument("--obs_alpha_s", type=float, default=None,
+                    help="override covariance loss weight")
+parser.add_argument("--obs_alpha_F", type=float, default=None,
+                    help="override mean-deformation loss weight")
 args = parser.parse_args()
 
 import sim_config as scfg
@@ -37,15 +46,34 @@ DATA_DIR = scfg.DATA_DIR
 target_data_npz = None
 
 
+def obs_weights():
+    if args.obs_mode == "full":
+        alpha_h, alpha_s, alpha_F = 1.0, 10.0, 5.0
+    elif args.obs_mode == "external":
+        alpha_h, alpha_s, alpha_F = 0.1, 1000.0, 0.0
+    else:
+        alpha_h, alpha_s, alpha_F = 1.0, 0.0, 0.0
+    if args.obs_alpha_h is not None:
+        alpha_h = args.obs_alpha_h
+    if args.obs_alpha_s is not None:
+        alpha_s = args.obs_alpha_s
+    if args.obs_alpha_F is not None:
+        alpha_F = args.obs_alpha_F
+    return alpha_h, alpha_s, alpha_F
+
+
 def load_target_data():
     global target_data_npz
     path = os.path.join(DATA_DIR, "target_trajectory.npz")
     data = np.load(path)
     target_data_npz = data
+    h = data["h"].astype(np.float32)[:cfg.n_steps]
+    s = data["s"].astype(np.float32)[:cfg.n_steps]
+    f = data["F_mean"].astype(np.float32)[:cfg.n_steps]
     return (
-        data["h"].astype(np.float32)[:cfg.n_steps],
-        data["s"].astype(np.float32)[:cfg.n_steps],
-        data["F_mean"].astype(np.float32)[:cfg.n_steps],
+        h,
+        s,
+        f,
         float(data["E_true"]),
         float(data["nu_true"]),
     )
@@ -83,10 +111,20 @@ def forward_observables(E_value, nu_value):
 
 
 def weighted_loss(pred_h, pred_s, pred_f, target_h, target_s, target_f):
-    h_loss = np.mean((pred_h - target_h) ** 2)
-    s_loss = np.sum((pred_s - target_s) ** 2) / cfg.n_steps
-    f_loss = np.sum((pred_f - target_f) ** 2) / cfg.n_steps
-    total = h_loss + 10.0 * s_loss + 5.0 * f_loss
+    if not (np.all(np.isfinite(pred_h))
+            and np.all(np.isfinite(pred_s))
+            and np.all(np.isfinite(pred_f))):
+        return 1e30, 1e30, 1e30, 1e30
+
+    h_diff = pred_h.astype(np.float64) - target_h.astype(np.float64)
+    s_diff = pred_s.astype(np.float64) - target_s.astype(np.float64)
+    f_diff = pred_f.astype(np.float64) - target_f.astype(np.float64)
+
+    h_loss = np.mean(h_diff * h_diff)
+    s_loss = np.sum(s_diff * s_diff) / cfg.n_steps
+    f_loss = np.sum(f_diff * f_diff) / cfg.n_steps
+    alpha_h, alpha_s, alpha_F = obs_weights()
+    total = alpha_h * h_loss + alpha_s * s_loss + alpha_F * f_loss
     if not np.isfinite(total):
         return 1e30, 1e30, 1e30, 1e30
     return float(total), float(h_loss), float(s_loss), float(f_loss)
@@ -97,20 +135,45 @@ def evaluate(E_value, nu_value, target_h, target_s, target_f):
     return weighted_loss(pred_h, pred_s, pred_f, target_h, target_s, target_f)
 
 
-def save_result(best_E, best_nu, eval_rows, iter_rows,
+def save_result(best_E, best_nu, eval_rows, iter_rows, run_start,
                 target_h, target_s, target_f, E_true, nu_true):
     pred_h, pred_s, pred_f = forward_observables(best_E, best_nu)
     best_total, best_h, best_s, best_f = weighted_loss(
         pred_h, pred_s, pred_f, target_h, target_s, target_f)
+    clean_payload = {}
+    if all(key in target_data_npz for key in ("h_clean", "s_clean",
+                                              "F_mean_clean")):
+        clean_h = target_data_npz["h_clean"].astype(np.float32)[:cfg.n_steps]
+        clean_s = target_data_npz["s_clean"].astype(np.float32)[:cfg.n_steps]
+        clean_f = target_data_npz["F_mean_clean"].astype(np.float32)[:cfg.n_steps]
+        clean_total, clean_h_loss, clean_s_loss, clean_f_loss = weighted_loss(
+            pred_h, pred_s, pred_f, clean_h, clean_s, clean_f)
+        clean_payload = dict(
+            target_h_clean=clean_h,
+            target_s_clean=clean_s,
+            target_F_mean_clean=clean_f,
+            clean_best_loss=np.float32(clean_total),
+            clean_best_h_loss=np.float32(clean_h_loss),
+            clean_best_s_loss=np.float32(clean_s_loss),
+            clean_best_F_loss=np.float32(clean_f_loss),
+        )
 
     eval_out = np.array(eval_rows, dtype=np.float32)
     iter_out = np.array(iter_rows, dtype=np.float32)
+    runtime_sec = time.perf_counter() - run_start
+    n_forward_evals = int(len(eval_rows) + 1)
     os.makedirs(DATA_DIR, exist_ok=True)
     out_path = os.path.join(DATA_DIR, "baseline_search_result.npz")
     np.savez(out_path,
              evaluations=eval_out,
              iterations=iter_out,
              learn_param=args.learn_param,
+             obs_mode=args.obs_mode,
+             obs_alpha_h=np.float32(obs_weights()[0]),
+             obs_alpha_s=np.float32(obs_weights()[1]),
+             obs_alpha_F=np.float32(obs_weights()[2]),
+             runtime_sec=np.float32(runtime_sec),
+             n_forward_evals=np.int32(n_forward_evals),
              best_E=np.float32(best_E),
              best_nu=np.float32(best_nu),
              best_loss=np.float32(best_total),
@@ -124,7 +187,8 @@ def save_result(best_E, best_nu, eval_rows, iter_rows,
              pred_F_mean=pred_f,
              target_h=target_h,
              target_s=target_s,
-             target_F_mean=target_f)
+             target_F_mean=target_f,
+             **clean_payload)
 
     if args.learn_param == "E":
         legacy_path = os.path.join(DATA_DIR, "E_search_result.npz")
@@ -143,7 +207,13 @@ def save_result(best_E, best_nu, eval_rows, iter_rows,
                  pred_F_mean=pred_f,
                  target_h=target_h,
                  target_s=target_s,
-                 target_F_mean=target_f)
+                 target_F_mean=target_f,
+                 obs_mode=args.obs_mode,
+                 obs_alpha_h=np.float32(obs_weights()[0]),
+                 obs_alpha_s=np.float32(obs_weights()[1]),
+                 obs_alpha_F=np.float32(obs_weights()[2]),
+                 runtime_sec=np.float32(runtime_sec),
+                 n_forward_evals=np.int32(n_forward_evals))
         np.save(os.path.join(DATA_DIR, "E_search_log.npy"),
                 np.column_stack([eval_out[:, 0], eval_out[:, 2]]))
 
@@ -153,11 +223,13 @@ def save_result(best_E, best_nu, eval_rows, iter_rows,
     print(f"  abs errors:  E={abs(best_E - E_true):.8g}, "
           f"nu={abs(best_nu - nu_true):.8g}")
     print(f"  final loss:  {best_total:.8g}")
+    print(f"  runtime:     {runtime_sec:.2f}s ({n_forward_evals} forward evals)")
     print(f"  saved:       {out_path}")
     print("=" * 72 + "\n")
 
 
 def golden_section_E(target_h, target_s, target_f, E_true, nu_true):
+    run_start = time.perf_counter()
     lo, hi = args.E_lo, args.E_hi
     phi = (1.0 + np.sqrt(5.0)) / 2.0
     inv_phi = 1.0 / phi
@@ -173,6 +245,9 @@ def golden_section_E(target_h, target_s, target_f, E_true, nu_true):
     print("  DERIVATIVE-FREE BASELINE: 1D E SEARCH")
     print("=" * 72)
     print(f"  target: E={E_true:.6g}, nu fixed at {nu_true:.6g}")
+    print(f"  obs_mode: {args.obs_mode}")
+    print(f"  obs weights: alpha_h={obs_weights()[0]:g}, "
+          f"alpha_s={obs_weights()[1]:g}, alpha_F={obs_weights()[2]:g}")
     print(f"  bracket: [{lo:.6g}, {hi:.6g}], iters={args.iters}")
     print("-" * 72)
     print(f"{'it':>3} {'lo':>10} {'hi':>10} {'best_E':>10} "
@@ -205,11 +280,12 @@ def golden_section_E(target_h, target_s, target_f, E_true, nu_true):
         print(f"{it:3d} {lo:10.4f} {hi:10.4f} {best_E:10.4f} "
               f"{best_loss:12.4e} {width:10.4f} {elapsed:8.2f}")
 
-    save_result(best_E, nu_true, eval_rows, iter_rows,
+    save_result(best_E, nu_true, eval_rows, iter_rows, run_start,
                 target_h, target_s, target_f, E_true, nu_true)
 
 
 def grid_search(target_h, target_s, target_f, E_true, nu_true):
+    run_start = time.perf_counter()
     if args.learn_param == "nu":
         E_lo = E_hi = E_true
         nu_lo, nu_hi = args.nu_lo, args.nu_hi
@@ -227,6 +303,9 @@ def grid_search(target_h, target_s, target_f, E_true, nu_true):
     print("  DERIVATIVE-FREE BASELINE: GRID SEARCH")
     print("=" * 72)
     print(f"  learn_param = {args.learn_param}")
+    print(f"  obs_mode = {args.obs_mode}")
+    print(f"  obs weights: alpha_h={obs_weights()[0]:g}, "
+          f"alpha_s={obs_weights()[1]:g}, alpha_F={obs_weights()[2]:g}")
     print(f"  target: E={E_true:.6g}, nu={nu_true:.6g}")
     print(f"  grid_size = {args.grid_size}, levels = {args.levels}")
     print("-" * 72)
@@ -271,7 +350,7 @@ def grid_search(target_h, target_s, target_f, E_true, nu_true):
             nu_lo = max(args.nu_lo, best_nu - nu_step)
             nu_hi = min(args.nu_hi, best_nu + nu_step)
 
-    save_result(best_E, best_nu, eval_rows, iter_rows,
+    save_result(best_E, best_nu, eval_rows, iter_rows, run_start,
                 target_h, target_s, target_f, E_true, nu_true)
 
 

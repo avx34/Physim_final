@@ -27,83 +27,64 @@ pip install -r requirements.txt
 
 ## Run
 
-Generate target data:
+Generate the default noisy target data for the main experiment:
 
 ```powershell
 cd Inversive
-python code\gen_target_data.py
+python code\gen_target_data.py --E 450 --nu 0.35 --warmup_steps 170 --noise_h 0.001 --noise_seed 0
 ```
 
 Target generation uses a deterministic high-drop initial particle cloud, runs a
 fixed warm-up phase, then records the collision-rich trajectory segment. The
 warm-up end state is saved as `x0/v0/C0/F0`, and training, inference, and the
-baseline all start from that same state.
+baseline all start from that same state. Noise is added only to saved target
+observables, not to the forward simulator. The file still stores clean arrays
+as `h_clean`, `s_clean`, and `F_mean_clean`, while training uses noisy `h`, `s`,
+and `F_mean`.
 
-To change how much pre-collision motion is skipped:
+Train the main NN+FD inverse model:
 
 ```powershell
-python code\gen_target_data.py --warmup_steps 170
+python code\inverse_train.py --train --learn_param both
+```
+
+Run inference:
+
+```powershell
+python code\inverse_train.py --infer --learn_param both
+```
+
+Generate plots:
+
+```powershell
+python code\plot_results.py --method nn
 ```
 
 For the current scene, `--warmup_steps` in the range `170` to `180` is
-recommended.
+recommended. If `trace(s)` stays almost constant and `det(F_mean)` remains near
+`1.0` through the recorded trajectory, the object has not meaningfully collided
+yet; increase `--warmup_steps` slightly within that range.
 
-To test another target material, regenerate target data with a chosen `E` or
-Poisson ratio `nu`, then train/infer again:
+The default inverse loss is the realistic external-observation setting:
 
-```powershell
-python code\gen_target_data.py --E 450 --warmup_steps 170
-python code\inverse_train.py --train
-python code\inverse_train.py --infer
-
-python code\gen_target_data.py --nu 0.35 --warmup_steps 170
-python code\inverse_train.py --train --learn_param nu
-python code\inverse_train.py --infer --learn_param nu
-
-python code\gen_target_data.py --E 450 --nu 0.35 --warmup_steps 170
-python code\inverse_train.py --train --learn_param both
-python code\inverse_train.py --infer --learn_param both
+```text
+0.1 * h_loss + 1000 * s_loss
 ```
 
-If `trace(s)` stays almost constant and `det(F_mean)` remains near `1.0`
-through the recorded trajectory, the object has not meaningfully collided yet.
-Increase `--warmup_steps` slightly within that range.
+This avoids using `F_mean`, which is an internal simulator deformation
+quantity, and downweights noisy height observations. Useful switches:
+
+- `--learn_param E`, `--learn_param nu`, or `--learn_param both`.
+- `--obs_mode external`, `full`, or `height`.
+- `--obs_alpha_h`, `--obs_alpha_s`, and `--obs_alpha_F` for loss-weight ablations.
+- `--noise_h`, `--noise_s`, and `--noise_F` for target-observation noise.
 
 ## Method A: NN+FD Inverse Model
 
-This route predicts one material parameter with a small Taichi-backed neural
+This route predicts material parameters with a small Taichi-backed neural
 network. The physics gradient is estimated with finite differences, then
 backpropagated only through the neural network. This avoids reverse-mode AD
 through the full MPM rollout while keeping the neural inverse estimator.
-
-Train the neural model:
-
-```powershell
-python code\inverse_train.py --train
-```
-
-Inference after training:
-
-```powershell
-python code\inverse_train.py --infer
-```
-
-To learn Poisson ratio instead, keep `E` fixed to the target value and train
-only `nu`:
-
-```powershell
-python code\gen_target_data.py --nu 0.35 --warmup_steps 170
-python code\inverse_train.py --train --learn_param nu
-python code\inverse_train.py --infer --learn_param nu
-```
-
-To learn Young's modulus and Poisson ratio simultaneously:
-
-```powershell
-python code\gen_target_data.py --E 450 --nu 0.35 --warmup_steps 170
-python code\inverse_train.py --train --learn_param both
-python code\inverse_train.py --infer --learn_param both
-```
 
 The default learning rate is `3e-3`, override it with `--lr` when
 running ablations.
@@ -143,6 +124,10 @@ python code\plot_results.py --method baseline
 python code\plot_results.py --method all
 ```
 
+`--method all` also creates a comparison figure with parameter error, weighted
+loss, runtime, and the number of forward evaluations when both NN+FD and
+baseline result files are available.
+
 Generate the default Taichi collision-scene comparison video:
 
 ```powershell
@@ -179,6 +164,8 @@ to `Inversive\data\plots\baseline\`. Training writes
 `Inversive\data\predicted_trajectory.npz`; the baseline writes
 `Inversive\data\baseline_search_result.npz` and keeps
 `Inversive\data\E_search_result.npz` for default E-only compatibility.
+Training and baseline result files record wall-clock runtime for lightweight
+method comparisons.
 Side-by-side rollout videos are written to `Inversive\data\renders\`.
 
 Interactive demo:
