@@ -23,6 +23,14 @@ parser.add_argument("--no_particles", action="store_true",
                     help="do not save per-step particle positions")
 parser.add_argument("--warmup_steps", type=int, default=170,
                     help="simulation steps to run before recording target data")
+parser.add_argument("--noise_h", type=float, default=0.0,
+                    help="Gaussian std added to recorded mean height h")
+parser.add_argument("--noise_s", type=float, default=0.0,
+                    help="Gaussian std added to recorded covariance s")
+parser.add_argument("--noise_F", type=float, default=0.0,
+                    help="Gaussian std added to recorded mean deformation F")
+parser.add_argument("--noise_seed", type=int, default=0,
+                    help="random seed for target-observation noise")
 args = parser.parse_args()
 
 import taichi as ti
@@ -206,6 +214,33 @@ def substep():
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def add_observation_noise(h_arr, s_arr, F_arr):
+    """Return noisy observables while preserving clean arrays for analysis."""
+    if args.noise_h == 0.0 and args.noise_s == 0.0 and args.noise_F == 0.0:
+        return h_arr.copy(), s_arr.copy(), F_arr.copy()
+
+    rng = np.random.default_rng(args.noise_seed)
+    h_noisy = h_arr.astype(np.float32).copy()
+    s_noisy = s_arr.astype(np.float32).copy()
+    F_noisy = F_arr.astype(np.float32).copy()
+
+    if args.noise_h > 0.0:
+        h_noisy += rng.normal(0.0, args.noise_h, size=h_noisy.shape).astype(
+            np.float32)
+
+    if args.noise_s > 0.0:
+        raw = rng.normal(0.0, args.noise_s, size=s_noisy.shape).astype(
+            np.float32)
+        sym = 0.5 * (raw + np.swapaxes(raw, -1, -2))
+        s_noisy += sym
+
+    if args.noise_F > 0.0:
+        F_noisy += rng.normal(0.0, args.noise_F, size=F_noisy.shape).astype(
+            np.float32)
+
+    return h_noisy, s_noisy, F_noisy
+
+
 if __name__ == "__main__":
     os.makedirs(DATA_DIR, exist_ok=True)
     init()
@@ -254,17 +289,26 @@ if __name__ == "__main__":
     h_arr = np.array(h_list, dtype=np.float32)
     s_arr = np.array(s_list, dtype=np.float32)
     F_arr = np.array(F_list, dtype=np.float32)
+    h_clean = h_arr.copy()
+    s_clean = s_arr.copy()
+    F_clean = F_arr.copy()
+    h_arr, s_arr, F_arr = add_observation_noise(h_arr, s_arr, F_arr)
 
     out_path = args.out
     if not os.path.isabs(out_path):
         out_path = os.path.join(DATA_DIR, out_path)
 
     payload = dict(h=h_arr, s=s_arr, F_mean=F_arr,
+                   h_clean=h_clean, s_clean=s_clean, F_mean_clean=F_clean,
                    x0=x0, v0=v0, C0=C0, F0=F0,
                    E_true=E_true, nu_true=nu_true,
                    dt=cfg.dt, substeps_per_step=cfg.substeps_per_step,
                    n_steps=cfg.n_steps,
-                   warmup_steps=args.warmup_steps)
+                   warmup_steps=args.warmup_steps,
+                   noise_h=args.noise_h,
+                   noise_s=args.noise_s,
+                   noise_F=args.noise_F,
+                   noise_seed=args.noise_seed)
     if x_list:
         payload["x"] = np.stack(x_list, axis=0).astype(np.float32)
 
@@ -274,6 +318,12 @@ if __name__ == "__main__":
     if x_list:
         print(f"  shape x: {payload['x'].shape}")
     print(f"  saved warm-up state: x0/v0/C0/F0")
+    if args.noise_h > 0.0 or args.noise_s > 0.0 or args.noise_F > 0.0:
+        print("  observation noise:")
+        print(f"    noise_h={args.noise_h:g}, noise_s={args.noise_s:g}, "
+              f"noise_F={args.noise_F:g}, seed={args.noise_seed}")
+        print(f"    clean/noisy h rms diff: "
+              f"{np.sqrt(np.mean((h_arr - h_clean) ** 2)):.6g}")
     print(f"  h range: [{h_arr.min():.4f}, {h_arr.max():.4f}]")
     print(f"  final trace(s): {np.trace(s_arr[-1]):.6f}")
     if np.max(np.abs(F_arr - np.eye(3, dtype=np.float32))) < 1e-4:

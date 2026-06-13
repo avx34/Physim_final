@@ -32,6 +32,17 @@ parser.add_argument("--fd_eps_nu", type=float, default=1e-3,
                     help="finite-difference epsilon for Poisson ratio")
 parser.add_argument("--learn_param", choices=("E", "nu", "both"), default="E",
                     help="material parameter(s) to infer")
+parser.add_argument("--obs_mode", choices=("full", "external", "height"),
+                    default="external",
+                    help="loss observables: external=0.1h+1000s, full=h+10s+5F, height=h")
+parser.add_argument("--obs_alpha_h", type=float, default=None,
+                    help="override height loss weight")
+parser.add_argument("--obs_alpha_s", type=float, default=None,
+                    help="override covariance loss weight")
+parser.add_argument("--obs_alpha_F", type=float, default=None,
+                    help="override mean-deformation loss weight")
+parser.add_argument("--grad_stop", type=float, default=1e-10,
+                    help="stop when finite-difference gradient norm is below this value")
 parser.add_argument("--resume", type=str, default="",
                     help="model directory for inference")
 args = parser.parse_args()
@@ -80,6 +91,27 @@ optimizer: AdamW = None
 E_true = 200.0
 nu_true = 0.4
 target_data_npz = None
+
+
+def obs_weights():
+    if args.obs_mode == "full":
+        alpha_h, alpha_s, alpha_F = 1.0, 10.0, 5.0
+    elif args.obs_mode == "external":
+        alpha_h, alpha_s, alpha_F = 0.1, 1000.0, 0.0
+    else:
+        alpha_h, alpha_s, alpha_F = 1.0, 0.0, 0.0
+    if args.obs_alpha_h is not None:
+        alpha_h = args.obs_alpha_h
+    if args.obs_alpha_s is not None:
+        alpha_s = args.obs_alpha_s
+    if args.obs_alpha_F is not None:
+        alpha_F = args.obs_alpha_F
+    return alpha_h, alpha_s, alpha_F
+
+
+def weighted_mse(mse_h, mse_s, mse_f):
+    alpha_h, alpha_s, alpha_F = obs_weights()
+    return float(alpha_h * mse_h + alpha_s * mse_s + alpha_F * mse_f)
 
 
 def init_nn_model():
@@ -186,6 +218,14 @@ def load_target_data(path=None):
 
     print(f"Loaded target trajectory: {h_np.shape[0]} steps")
     print(f"  True params: E={E_true:.1f}, nu={nu_true:.3f}")
+    print(f"  Observation mode: {args.obs_mode}")
+    if any(key in data for key in ("noise_h", "noise_s", "noise_F")):
+        noise_h = float(data["noise_h"]) if "noise_h" in data else 0.0
+        noise_s = float(data["noise_s"]) if "noise_s" in data else 0.0
+        noise_F = float(data["noise_F"]) if "noise_F" in data else 0.0
+        noise_seed = int(data["noise_seed"]) if "noise_seed" in data else -1
+        print(f"  Target noise: h={noise_h:g}, s={noise_s:g}, "
+              f"F={noise_F:g}, seed={noise_seed}")
     if all(key in data for key in ("x0", "v0", "C0", "F0")):
         warmup = int(data["warmup_steps"]) if "warmup_steps" in data else -1
         print(f"  Initial state: warm-up snapshot (warmup_steps={warmup})")
@@ -223,7 +263,8 @@ def forward_loss_for_params(param_values):
         for _ in range(cfg.substeps_per_step):
             sim.differentiable_substep()
         run_obs_kernels(step)
-        obs.compute_step_loss(step)
+        alpha_h, alpha_s, alpha_F = obs_weights()
+        obs.compute_step_loss_weighted(step, alpha_h, alpha_s, alpha_F)
 
     return float(obs.loss[None])
 
@@ -282,6 +323,7 @@ def finite_difference_gradient(param_values):
 
 
 def train():
+    train_start = time.perf_counter()
     print("\n" + "=" * 72)
     print("  NN + FINITE-DIFFERENCE PHYSICS GRADIENT")
     print("=" * 72)
@@ -293,8 +335,12 @@ def train():
 
     print(f"  max_epochs = {max_epochs}")
     print(f"  learn_param = {args.learn_param}")
+    print(f"  obs_mode = {args.obs_mode}")
     print(f"  lr = {args.lr:g}, fd_eps_E = {args.fd_eps_E:g}, "
           f"fd_eps_nu = {args.fd_eps_nu:g}")
+    print(f"  obs weights: alpha_h = {obs_weights()[0]:g}, "
+          f"alpha_s = {obs_weights()[1]:g}, "
+          f"alpha_F = {obs_weights()[2]:g}, grad_stop = {args.grad_stop:g}")
     print("-" * 72)
     print(f"{'epoch':>5} {'loss':>12} {'E':>10} {'nu':>9} "
           f"{'|dE|':>10} {'|dnu|':>9} {'|grad|':>10} {'time':>8}")
@@ -372,7 +418,7 @@ def train():
                   f"{grad_norm:10.3e} "
                   f"{epoch_time:8.2f}")
 
-        if grad_norm < 1e-8:
+        if args.grad_stop > 0.0 and grad_norm < args.grad_stop:
             print(f"  [STOP] finite-difference gradient is tiny at epoch {epoch}")
             break
 
@@ -381,6 +427,7 @@ def train():
     fc2.dump_weights(os.path.join(ACTIVE_MODEL_DIR, "fc2.pkl"))
     np.save(os.path.join(DATA_DIR, "loss_history.npy"),
             np.array(losses, dtype=np.float32))
+    train_runtime = time.perf_counter() - train_start
 
     if train_log:
         train_log_arr = np.array(train_log, dtype=np.float32)
@@ -401,10 +448,18 @@ def train():
                  E_true=np.float32(E_true),
                  nu_true=np.float32(nu_true),
                  learn_param=args.learn_param,
+                 obs_mode=args.obs_mode,
+                 obs_alpha_h=np.float32(obs_weights()[0]),
+                 obs_alpha_s=np.float32(obs_weights()[1]),
+                 obs_alpha_F=np.float32(obs_weights()[2]),
                  lr=np.float32(args.lr),
                  fd_eps_E=np.float32(args.fd_eps_E),
                  fd_eps_nu=np.float32(args.fd_eps_nu),
+                 grad_stop=np.float32(args.grad_stop),
                  max_epochs=np.int32(max_epochs),
+                 train_runtime_sec=np.float32(train_runtime),
+                 n_forward_evals=np.int32(len(train_log_arr)
+                                          * (2 * len(active_param_names()) + 1)),
                  n_input=np.int32(cfg.n_input),
                  n_hidden=np.int32(cfg.n_hidden),
                  n_output=np.int32(cfg.n_output),
@@ -412,6 +467,7 @@ def train():
 
     print("-" * 72)
     print(f"Model saved to {ACTIVE_MODEL_DIR}/")
+    print(f"Training runtime: {train_runtime:.2f}s")
     print(f"Training log saved to {DATA_DIR}/training_log.npz")
     return losses
 
@@ -453,29 +509,64 @@ def infer():
     mse_h = np.mean((pred_h - target_h) ** 2)
     mse_s = np.mean((pred_s - target_s) ** 2)
     mse_f = np.mean((pred_f - target_f) ** 2)
+    weighted_loss = weighted_mse(mse_h, mse_s, mse_f)
     print(f"MSE(h)={mse_h:.8e}, MSE(s)={mse_s:.8e}, MSE(F)={mse_f:.8e}")
+    print(f"Weighted loss ({args.obs_mode})={weighted_loss:.8e}")
+
+    clean_payload = {}
+    if all(key in target_data_npz for key in ("h_clean", "s_clean",
+                                              "F_mean_clean")):
+        clean_h = target_data_npz["h_clean"].astype(np.float32)[:cfg.n_steps]
+        clean_s = target_data_npz["s_clean"].astype(np.float32)[:cfg.n_steps]
+        clean_f = target_data_npz["F_mean_clean"].astype(np.float32)[:cfg.n_steps]
+        clean_mse_h = np.mean((pred_h - clean_h) ** 2)
+        clean_mse_s = np.mean((pred_s - clean_s) ** 2)
+        clean_mse_f = np.mean((pred_f - clean_f) ** 2)
+        clean_weighted_loss = weighted_mse(clean_mse_h, clean_mse_s,
+                                           clean_mse_f)
+        clean_payload = dict(
+            target_h_clean=clean_h,
+            target_s_clean=clean_s,
+            target_F_mean_clean=clean_f,
+            clean_mse_h=np.float32(clean_mse_h),
+            clean_mse_s=np.float32(clean_mse_s),
+            clean_mse_F=np.float32(clean_mse_f),
+            clean_weighted_loss=np.float32(clean_weighted_loss),
+        )
+        print("Clean-target MSE: "
+              f"h={clean_mse_h:.8e}, s={clean_mse_s:.8e}, "
+              f"F={clean_mse_f:.8e}")
 
     os.makedirs(DATA_DIR, exist_ok=True)
-    np.savez(os.path.join(DATA_DIR, "predicted_trajectory.npz"),
-             h=pred_h,
-             s=pred_s,
-             F_mean=pred_f,
-             x=pred_x,
-             target_h=target_h,
-             target_s=target_s,
-             target_F_mean=target_f,
-             E_pred=np.float32(E_pred),
-             nu_pred=np.float32(nu_pred),
-             E_true=np.float32(E_true),
-             nu_true=np.float32(nu_true),
-             learn_param=args.learn_param,
-             model_dir=ACTIVE_MODEL_DIR,
-             lr=np.float32(args.lr),
-             fd_eps_E=np.float32(args.fd_eps_E),
-             fd_eps_nu=np.float32(args.fd_eps_nu),
-             mse_h=np.float32(mse_h),
-             mse_s=np.float32(mse_s),
-             mse_F=np.float32(mse_f))
+    payload = dict(h=pred_h,
+                   s=pred_s,
+                   F_mean=pred_f,
+                   x=pred_x,
+                   target_h=target_h,
+                   target_s=target_s,
+                   target_F_mean=target_f,
+                   E_pred=np.float32(E_pred),
+                   nu_pred=np.float32(nu_pred),
+                   E_true=np.float32(E_true),
+                   nu_true=np.float32(nu_true),
+                   learn_param=args.learn_param,
+                   obs_mode=args.obs_mode,
+                   obs_alpha_h=np.float32(obs_weights()[0]),
+                   obs_alpha_s=np.float32(obs_weights()[1]),
+                   obs_alpha_F=np.float32(obs_weights()[2]),
+                   model_dir=ACTIVE_MODEL_DIR,
+                   lr=np.float32(args.lr),
+                   fd_eps_E=np.float32(args.fd_eps_E),
+                   fd_eps_nu=np.float32(args.fd_eps_nu),
+                   mse_h=np.float32(mse_h),
+                   mse_s=np.float32(mse_s),
+                   mse_F=np.float32(mse_f),
+                   weighted_loss=np.float32(weighted_loss),
+                   **clean_payload)
+    for key in ("noise_h", "noise_s", "noise_F", "noise_seed"):
+        if key in target_data_npz:
+            payload[key] = target_data_npz[key]
+    np.savez(os.path.join(DATA_DIR, "predicted_trajectory.npz"), **payload)
     print(f"Predicted trajectory saved to {DATA_DIR}/predicted_trajectory.npz")
 
 
