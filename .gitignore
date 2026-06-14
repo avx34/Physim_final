@@ -18,8 +18,10 @@ imgui.ini
 
 # Generated simulation artifacts
 data/
-**/data/
+data_ad/
+data_camera/
 *.npy
 *.npz
+*.pkl
 *.ply
 *.mp4

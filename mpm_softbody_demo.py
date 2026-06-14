@@ -16,7 +16,7 @@ p_rho = 1
 p_mass = p_vol * p_rho
 
 # 弹性体材质参数 (Neo-Hookean)
-E, nu = 400, 0.4
+E, nu = 200, 0.4
 mu_0, lambda_0 = E / (2 * (1 + nu)), E * nu / ((1 + nu) * (1 - 2 * nu))
 
 # 碰撞参数

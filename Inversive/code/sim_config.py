@@ -13,6 +13,8 @@ import taichi as ti
 _PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_PROJ_ROOT, "data")
 MODEL_DIR = os.path.join(DATA_DIR, "trained_model")
+CAM_DATA_DIR = os.path.join(_PROJ_ROOT, "data_camera")
+CAM_MODEL_DIR = os.path.join(CAM_DATA_DIR, "trained_model")
 
 
 class SimConfig:
@@ -54,6 +56,17 @@ class SimConfig:
         self.n_input = 6
         self.n_hidden = 32
         self.n_output = 1
+
+        # ---- Camera module configuration ----
+        # Camera pose: elevated side view of the simulation box
+        self.cam_position = (0.7, 1.8, 2.0)
+        self.cam_lookat = (0.5, 0.15, 0.6)
+        self.cam_fov_deg = 45.0
+        self.cam_aspect_ratio = 1.0
+        self.cam_resolution = (800, 800)
+
+        # Camera-specific NN input count (can differ from 3D mode)
+        self.n_input_camera = 8
 
         # derived (computed once at init)
         self._recompute_derived()
